@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-dark-base text-white;
+    margin: 0;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-dark-base;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-dark-muted rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-vibe-700;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Neon text glow */
+  .text-glow {
+    text-shadow:
+      0 0 10px rgba(168, 85, 247, 0.8),
+      0 0 20px rgba(168, 85, 247, 0.5),
+      0 0 40px rgba(168, 85, 247, 0.3);
+  }
+
+  /* Glass surface */
+  .glass {
+    @apply backdrop-blur-md bg-dark-surface/70 border border-dark-border;
+  }
+
+  /* Neon border animation */
+  .border-neon-pulse {
+    animation: borderNeonPulse 2.5s ease-in-out infinite;
+  }
+
+  @keyframes borderNeonPulse {
+    0%, 100% { border-color: rgba(168, 85, 247, 0.3); }
+    50%       { border-color: rgba(168, 85, 247, 0.7); box-shadow: 0 0 12px 2px rgba(168,85,247,0.3); }
+  }
+}
+
+/* Selection highlight */
+::selection {
+  background: rgba(168, 85, 247, 0.35);
+  color: white;
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid rgba(168, 85, 247, 0.6);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
