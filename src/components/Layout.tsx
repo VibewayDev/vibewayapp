@@ -1,17 +1,20 @@
 import { Outlet } from 'react-router-dom';
 import Navbar from './Navbar';
+import { useTheme } from '../lib/timeTheme';
 
 export default function Layout() {
-  return (
-    <div className="min-h-screen bg-dark-base bg-vibe-mesh">
-      <Navbar />
+  const { theme } = useTheme();
 
-      {/* Content area — offset for sidebar on desktop, top/bottom bars on mobile */}
-      <main className="md:ml-64 pt-16 pb-20 md:pt-0 md:pb-0 min-h-screen">
-        <div className="max-w-5xl mx-auto px-4 md:px-8 py-8">
-          <Outlet />
-        </div>
+  return (
+    <div
+      className={`min-h-screen transition-colors duration-700 ${
+        theme === 'night' ? 'bg-night-base' : 'bg-day-base'
+      }`}
+    >
+      <main className="pb-24 min-h-screen">
+        <Outlet />
       </main>
+      <Navbar />
     </div>
   );
 }

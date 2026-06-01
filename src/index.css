@@ -5,9 +5,7 @@
 @tailwind utilities;
 
 @layer base {
-  * {
-    box-sizing: border-box;
-  }
+  * { box-sizing: border-box; }
 
   html {
     font-family: 'Inter', system-ui, sans-serif;
@@ -15,28 +13,12 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  body {
-    @apply bg-dark-base text-white;
-    margin: 0;
-  }
+  body { margin: 0; }
 
-  /* Scrollbar styling */
-  ::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-
-  ::-webkit-scrollbar-track {
-    @apply bg-dark-base;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    @apply bg-dark-muted rounded-full;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-vibe-700;
-  }
+  ::-webkit-scrollbar { width: 3px; height: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(245,166,35,0.2); border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(245,166,35,0.4); }
 }
 
 @layer utilities {
@@ -44,43 +26,33 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Neon text glow */
-  .text-glow {
-    text-shadow:
-      0 0 10px rgba(168, 85, 247, 0.8),
-      0 0 20px rgba(168, 85, 247, 0.5),
-      0 0 40px rgba(168, 85, 247, 0.3);
-  }
-
-  /* Glass surface */
-  .glass {
-    @apply backdrop-blur-md bg-dark-surface/70 border border-dark-border;
-  }
-
-  /* Neon border animation */
-  .border-neon-pulse {
-    animation: borderNeonPulse 2.5s ease-in-out infinite;
-  }
-
-  @keyframes borderNeonPulse {
-    0%, 100% { border-color: rgba(168, 85, 247, 0.3); }
-    50%       { border-color: rgba(168, 85, 247, 0.7); box-shadow: 0 0 12px 2px rgba(168,85,247,0.3); }
-  }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
 }
 
-/* Selection highlight */
 ::selection {
-  background: rgba(168, 85, 247, 0.35);
+  background: rgba(245, 166, 35, 0.3);
   color: white;
 }
 
-/* Focus ring */
 :focus-visible {
-  outline: 2px solid rgba(168, 85, 247, 0.6);
+  outline: 2px solid rgba(245, 166, 35, 0.6);
   outline-offset: 2px;
   border-radius: 8px;
+}
+
+/* Range input */
+input[type='range'] {
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(245,166,35,0.2);
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f5a623;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(245,166,35,0.5);
 }

@@ -1,113 +1,107 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Zap, Music, Radio, Waves } from 'lucide-react';
+import { ArrowRight, Radar, Shield, Zap } from 'lucide-react';
 import Logo from '../components/Logo';
-
-const features = [
-  { icon: Zap,   title: 'Instant Vibes',  desc: 'Discover trending sounds in real time.' },
-  { icon: Music, title: 'Curated Drops',  desc: 'Hand-picked collections updated daily.' },
-  { icon: Radio, title: 'Live Channels',  desc: 'Tune into live audio streams worldwide.' },
-  { icon: Waves, title: 'Wave Sync',      desc: 'Sync your vibe with your crew.' },
-];
+import { useTheme } from '../lib/timeTheme';
 
 export default function Welcome() {
   const navigate = useNavigate();
+  const { theme } = useTheme();
+  const isNight = theme === 'night';
 
   return (
-    <div className="min-h-screen bg-dark-base overflow-hidden flex flex-col">
-      {/* Ambient background blobs */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-vibe-700/10 blur-[120px]" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-neon-pink/8 blur-[100px]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] rounded-full bg-vibe-600/5 blur-[150px]" />
+    <div
+      className={`min-h-screen flex flex-col overflow-hidden transition-colors duration-700 ${
+        isNight ? 'bg-night-base' : 'bg-day-base'
+      }`}
+    >
+      {/* Radar bg decoration */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          {[300, 220, 140, 70].map((r, i) => (
+            <div
+              key={r}
+              className="absolute rounded-full border"
+              style={{
+                width: r * 2, height: r * 2,
+                top: -r, left: -r,
+                borderColor: isNight
+                  ? `rgba(245,166,35,${0.04 + i * 0.03})`
+                  : `rgba(180,100,0,${0.05 + i * 0.03})`,
+              }}
+            />
+          ))}
+        </div>
+        <svg className="absolute inset-0 w-full h-full opacity-[0.04]">
+          <defs>
+            <pattern id="wgrid" width="60" height="60" patternUnits="userSpaceOnUse">
+              <path d="M 60 0 L 0 0 0 60" fill="none" stroke={isNight ? '#f5a623' : '#92400e'} strokeWidth="0.5" />
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#wgrid)" />
+        </svg>
       </div>
 
-      {/* Grid overlay */}
-      <div
-        className="fixed inset-0 pointer-events-none opacity-[0.03]"
-        style={{
-          backgroundImage: 'linear-gradient(rgba(168,85,247,1) 1px, transparent 1px), linear-gradient(90deg, rgba(168,85,247,1) 1px, transparent 1px)',
-          backgroundSize: '60px 60px',
-        }}
-      />
-
-      {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-6 md:px-12 py-6">
-        <div className="flex items-center gap-3">
-          <Logo size={44} animated />
-          <span className="text-2xl font-bold tracking-tight text-white">
-            vibe<span className="text-vibe-400">way</span>
-          </span>
-        </div>
-        <button
-          onClick={() => navigate('/home')}
-          className="text-sm text-gray-400 hover:text-white transition-colors duration-200 border border-dark-border hover:border-vibe-600/50 px-4 py-2 rounded-lg"
-        >
-          Sign in
-        </button>
-      </header>
-
-      {/* Hero */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 md:px-12 text-center py-16">
-        {/* Badge */}
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-vibe-600/15 border border-vibe-600/30 text-vibe-300 text-xs font-medium mb-8 animate-fade-in shadow-neon-sm">
-          <span className="w-1.5 h-1.5 rounded-full bg-vibe-400 animate-pulse" />
-          Now live — vibeway beta
+      {/* Content */}
+      <div className="relative z-10 flex flex-col flex-1 items-center justify-center px-6 text-center">
+        <div className="animate-float mb-8">
+          <Logo size={72} />
         </div>
 
-        {/* Headline */}
-        <h1 className="text-5xl md:text-7xl font-bold text-white leading-tight mb-6 animate-slide-up">
-          Feel the{' '}
-          <span className="relative inline-block">
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-vibe-400 via-neon-purple to-neon-pink">
-              frequency
-            </span>
-            <span className="absolute -bottom-1 left-0 right-0 h-px bg-gradient-to-r from-vibe-400 via-neon-purple to-neon-pink opacity-60" />
-          </span>
-          <br />of your world.
+        <h1 className={`text-4xl font-bold mb-2 ${isNight ? 'text-white' : 'text-day-text'}`}>
+          vibe<span className={isNight ? 'text-radar-gold' : 'text-amber-600'}>way</span>
         </h1>
-
-        <p className="max-w-xl text-gray-400 text-lg md:text-xl leading-relaxed mb-10 animate-slide-up" style={{ animationDelay: '0.1s' }}>
-          vibeway is your space for real-time audio discovery, live streams, and synced experiences with the people who matter.
+        <p className={`text-lg font-medium mb-2 ${isNight ? 'text-radar-gold/80' : 'text-amber-600/80'}`}>
+          Match en tiempo real para viajeros
+        </p>
+        <p className={`text-sm leading-relaxed max-w-xs mb-10 ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
+          Descubre quién viaja en tu mismo medio de transporte y conecta de forma segura.
         </p>
 
-        {/* CTA buttons */}
-        <div className="flex flex-col sm:flex-row items-center gap-4 animate-slide-up" style={{ animationDelay: '0.2s' }}>
-          <button
-            onClick={() => navigate('/home')}
-            className="group flex items-center gap-2 px-8 py-4 rounded-2xl bg-gradient-to-r from-vibe-600 to-vibe-500 text-white font-semibold text-base shadow-neon hover:shadow-neon-lg transition-all duration-300 hover:scale-105 active:scale-95"
-          >
-            Get started free
-            <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform duration-200" />
-          </button>
-          <button
-            onClick={() => navigate('/explore')}
-            className="flex items-center gap-2 px-8 py-4 rounded-2xl border border-dark-border text-gray-300 font-medium text-base hover:border-vibe-600/50 hover:text-white transition-all duration-200"
-          >
-            Explore vibes
-          </button>
-        </div>
-
-        {/* Feature cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-20 w-full max-w-4xl animate-fade-in" style={{ animationDelay: '0.3s' }}>
-          {features.map(({ icon: Icon, title, desc }) => (
+        {/* Features */}
+        <div className="grid grid-cols-3 gap-3 w-full max-w-xs mb-10">
+          {[
+            { icon: Radar,  label: 'Radar en vivo' },
+            { icon: Shield, label: 'Privacidad total' },
+            { icon: Zap,    label: 'Conexión instant.' },
+          ].map(({ icon: Icon, label }) => (
             <div
-              key={title}
-              className="group p-6 rounded-2xl bg-dark-surface/80 border border-dark-border hover:border-vibe-600/40 transition-all duration-300 hover:shadow-neon-sm backdrop-blur-sm text-left"
+              key={label}
+              className={`flex flex-col items-center gap-2 p-3 rounded-2xl border ${
+                isNight ? 'bg-night-card border-night-border' : 'bg-white border-day-border shadow-card-day'
+              }`}
             >
-              <div className="w-10 h-10 rounded-xl bg-vibe-600/20 border border-vibe-600/30 flex items-center justify-center mb-4 group-hover:shadow-neon-sm transition-all duration-300">
-                <Icon size={18} className="text-vibe-400" />
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                isNight ? 'bg-radar-gold/15' : 'bg-amber-100'
+              }`}>
+                <Icon size={16} className={isNight ? 'text-radar-gold' : 'text-amber-600'} />
               </div>
-              <h3 className="text-white font-semibold text-sm mb-1">{title}</h3>
-              <p className="text-gray-500 text-xs leading-relaxed">{desc}</p>
+              <span className={`text-[10px] font-medium text-center leading-tight ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
+                {label}
+              </span>
             </div>
           ))}
         </div>
-      </main>
 
-      {/* Footer */}
-      <footer className="relative z-10 text-center py-6 text-gray-600 text-xs">
-        © 2026 vibeway · Built for the frequency seekers
-      </footer>
+        <button
+          onClick={() => navigate('/radar')}
+          className="group flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-base text-night-base transition-all active:scale-95"
+          style={{
+            background: 'linear-gradient(135deg, #f5a623, #ea580c)',
+            boxShadow: isNight ? '0 0 24px 6px rgba(245,166,35,0.35)' : '0 4px 20px rgba(245,166,35,0.4)',
+          }}
+        >
+          Abrir Radar
+          <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+        </button>
+
+        <p className={`mt-6 text-xs ${isNight ? 'text-slate-600' : 'text-slate-400'}`}>
+          Sin registro · Sin tracking permanente
+        </p>
+      </div>
+
+      <div className={`relative z-10 py-5 text-center text-[10px] ${isNight ? 'text-slate-700' : 'text-slate-400'}`}>
+        © 2026 vibeway · Hecho para los que se mueven
+      </div>
     </div>
   );
 }
