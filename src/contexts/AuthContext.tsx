@@ -57,16 +57,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signUp(email: string, password: string, username: string) {
     const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) return { error: translateError(error.message) };
-    if (data.user) {
-      await supabase.from('profiles').insert({
-        id: data.user.id,
+    if (error) return { error: `[signUp] ${error.message}` };
+
+    const { data: signInData, error: signInError } =
+      await supabase.auth.signInWithPassword({ email, password });
+    if (signInError) return { error: `[signIn] ${signInError.message}` };
+
+    const userId = signInData.user?.id ?? data.user?.id;
+    if (userId) {
+      const { error: profileError } = await supabase.from('profiles').insert({
+        id: userId,
         username,
         transport_mode: 'bus',
         status_text: 'En camino',
         visibility: 'public',
       });
+      if (profileError) return { error: `[profile] ${profileError.message} (code: ${profileError.code})` };
     }
+
     return { error: null };
   }
 
@@ -104,9 +112,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() { return useContext(Ctx); }
 
 function translateError(msg: string): string {
-  if (msg.includes('Invalid login credentials')) return 'Correo o contraseña incorrectos';
-  if (msg.includes('User already registered')) return 'Este correo ya está registrado';
-  if (msg.includes('Password should be')) return 'La contraseña debe tener al menos 6 caracteres';
-  if (msg.includes('Unable to validate email')) return 'Correo inválido';
-  return 'Ocurrió un error. Intenta de nuevo';
+  // DEBUG: raw error visible on screen
+  return msg;
 }
