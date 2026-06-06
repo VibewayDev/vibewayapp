@@ -32,7 +32,6 @@ export default function LoginPage() {
       if (username.includes(' ')) { setError('El usuario no puede tener espacios'); setLoading(false); return; }
       const { error } = await signUp(email, password, username.replace('@', ''));
       if (error) setError(error);
-      else setSuccess('¡Cuenta creada! Revisa tu correo para confirmarla antes de entrar.');
     } else {
       const { error } = await resetPassword(email);
       if (error) setError(error);

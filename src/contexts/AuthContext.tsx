@@ -67,6 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         status_text: 'En camino',
         visibility: 'public',
       });
+      // Confirm email is disabled — sign in immediately so the session is active
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInError) return { error: translateError(signInError.message) };
     }
     return { error: null };
   }
