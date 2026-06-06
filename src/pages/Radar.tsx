@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Pencil, Check, MapPin, Navigation, Plus, Thermometer } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
 import L from 'leaflet';
@@ -9,7 +9,6 @@ import { useTheme } from '../lib/timeTheme';
 import { useProfile } from '../lib/profileContext';
 import type { VisibilityMode } from '../lib/connectivity';
 
-// Fix default Leaflet marker icons in Vite
 const DefaultIcon = L.icon({ iconUrl, shadowUrl: iconShadow });
 L.Marker.mergeOptions({ icon: DefaultIcon });
 
@@ -67,7 +66,6 @@ const VISIBILITY_OPTIONS: { value: VisibilityMode; label: string; desc: string; 
   { value: 'off',     label: 'APAGADO',  desc: 'Invisible para todos',    color: 'text-slate-400' },
 ];
 
-// Build a colored div icon for a traveler marker
 function buildTravelerIcon(initial: string, isEnigma: boolean) {
   const bg = isEnigma ? '#475569' : '#f5a623';
   const html = `
@@ -94,13 +92,12 @@ function buildUserIcon(initial: string) {
   return L.divIcon({ html, className: '', iconSize: [40, 40], iconAnchor: [20, 20] });
 }
 
-// Scatter simulated travelers within ~400m of the user
 function nearbyCoords(lat: number, lng: number, radarX: number, radarY: number): [number, number] {
   const spread = 0.003;
   return [lat + radarY * spread, lng + radarX * spread];
 }
 
-const DEFAULT_CENTER: [number, number] = [-33.45, -70.65]; // Santiago, Chile
+const DEFAULT_CENTER: [number, number] = [-33.45, -70.65];
 
 export default function RadarPage() {
   const { theme, hour, setSimHour, simHour } = useTheme();
@@ -115,14 +112,12 @@ export default function RadarPage() {
   const [toast, setToast]             = useState(false);
   const isNight = theme === 'night';
 
-  // Connectivity
   useEffect(() => {
     connectivity.start();
     const unsub = connectivity.onTravelers(setTravelers);
     return () => { unsub(); connectivity.stop(); };
   }, []);
 
-  // GPS
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
       (pos) => setUserPos([pos.coords.latitude, pos.coords.longitude]),
@@ -130,7 +125,6 @@ export default function RadarPage() {
     );
   }, []);
 
-  // Temperature from Open-Meteo
   useEffect(() => {
     const [lat, lon] = userPos;
     fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`)
@@ -153,128 +147,25 @@ export default function RadarPage() {
     (t) => profile.visibility !== 'off' && t.visibility !== 'off',
   );
 
+  const glassNight = 'bg-[#0a1628]/80 border-amber-500/20 backdrop-blur-md';
+  const glassDay   = 'bg-white/85 border-slate-200/80 backdrop-blur-md shadow-sm';
+  const glass = isNight ? glassNight : glassDay;
+
   return (
-    <div
-      className={`relative flex flex-col min-h-screen overflow-hidden transition-colors duration-700 ${
-        isNight ? 'bg-night-base' : 'bg-day-base'
-      }`}
-    >
-      {/* ── TOP BAR ── */}
-      <header className="relative z-20 flex items-center justify-between px-4 pt-12 pb-3">
-        <div className="flex items-center gap-2">
-          <Navigation size={14} className={isNight ? 'text-radar-gold' : 'text-amber-600'} />
-          <span className={`text-xs font-mono ${isNight ? 'text-radar-gold/70' : 'text-amber-700/80'}`}>
-            {profile.route}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {temperature !== null && (
-            <div className={`flex items-center gap-1 text-[10px] font-mono ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
-              <Thermometer size={11} />
-              <span>{temperature}°C</span>
-            </div>
-          )}
-          <MapPin size={13} className={isNight ? 'text-night-muted' : 'text-day-muted'} />
-          <span className={`text-[10px] font-mono ${isNight ? 'text-night-muted' : 'text-day-muted'}`}>
-            {visibleTravelers.length} cerca
-          </span>
-          <button
-            onClick={() => setShowSimBar((v) => !v)}
-            className={`ml-2 text-[9px] px-2 py-0.5 rounded-full border font-mono transition-colors ${
-              isNight
-                ? 'border-night-border text-slate-500 hover:text-radar-gold hover:border-radar-gold/40'
-                : 'border-day-border text-slate-400 hover:text-amber-600'
-            }`}
-          >
-            SIM
-          </button>
-        </div>
-      </header>
+    <div className="relative w-full h-screen overflow-hidden">
 
-      {/* ── HOUR SIMULATOR ── */}
-      {showSimBar && (
-        <div className={`relative z-20 mx-4 mb-2 px-4 py-3 rounded-xl border flex items-center gap-3 ${
-          isNight ? 'bg-night-card border-night-border' : 'bg-white border-day-border'
-        }`}>
-          <span className={`text-xs font-medium ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
-            Hora: {simHour ?? hour}:00
-          </span>
-          <input
-            type="range" min={0} max={23} step={1}
-            value={simHour ?? hour}
-            onChange={(e) => setSimHour(Number(e.target.value))}
-            className="flex-1 accent-amber-500 h-1.5"
-          />
-          <button
-            onClick={() => setSimHour(null)}
-            className="text-[10px] text-amber-500 hover:text-amber-400 font-medium"
-          >
-            Real
-          </button>
-        </div>
-      )}
-
-      {/* ── MOOD STATUS BOX ── */}
-      <div className="relative z-20 mx-4 mb-3">
-        <div
-          className={`flex items-center gap-3 px-4 py-3 rounded-2xl border ${
-            isNight
-              ? 'bg-night-card/80 border-night-border backdrop-blur-sm'
-              : 'bg-white/80 border-day-border backdrop-blur-sm shadow-card-day'
-          }`}
-        >
-          <div className="flex-shrink-0">
-            <HexAvatar initial={profile.avatarInitial} color={profile.avatarColor} size={38} glow />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className={`text-[9px] font-bold tracking-widest mb-1 ${isNight ? 'text-radar-gold/60' : 'text-amber-600/70'}`}>
-              TU SENTIR HOY
-            </p>
-            {editingMood ? (
-              <input
-                autoFocus
-                value={moodDraft}
-                onChange={(e) => setMoodDraft(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && saveMood()}
-                maxLength={60}
-                className={`w-full text-sm font-medium bg-transparent border-b outline-none ${
-                  isNight ? 'text-white border-radar-gold/50' : 'text-day-text border-amber-400/60'
-                }`}
-              />
-            ) : (
-              <p className={`text-sm font-medium truncate ${isNight ? 'text-white' : 'text-day-text'}`}>
-                {profile.moodStatus || <span className="opacity-40 italic text-xs">Escribe tu estado...</span>}
-              </p>
-            )}
-          </div>
-          <button
-            onClick={() => editingMood ? saveMood() : setEditingMood(true)}
-            className={`flex-shrink-0 p-1.5 rounded-lg transition-all ${
-              isNight ? 'text-radar-gold/60 hover:text-radar-gold hover:bg-radar-gold/10' : 'text-amber-500 hover:bg-amber-50'
-            }`}
-          >
-            {editingMood ? <Check size={15} /> : <Pencil size={13} />}
-          </button>
-        </div>
-      </div>
-
-      {/* ── REAL MAP ── */}
-      <div className="relative z-10 flex-1 mx-4 mb-3 rounded-2xl overflow-hidden border" style={{
-        minHeight: 280,
-        borderColor: isNight ? 'rgba(245,166,35,0.2)' : '#e8edf9',
-      }}>
+      {/* ── FULLSCREEN MAP (base layer) ── */}
+      <div className="absolute inset-0 z-0">
         <MapContainer
           center={userPos}
           zoom={15}
-          style={{ width: '100%', height: '100%', minHeight: 280 }}
+          style={{ width: '100%', height: '100%' }}
           zoomControl={false}
         >
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           />
-
-          {/* Radius circle */}
           <Circle
             center={userPos}
             radius={500}
@@ -286,8 +177,6 @@ export default function RadarPage() {
               dashArray: '6 4',
             }}
           />
-
-          {/* User marker */}
           <Marker position={userPos} icon={buildUserIcon(profile.avatarInitial)}>
             <Popup>
               <strong>@{profile.username}</strong>
@@ -295,8 +184,6 @@ export default function RadarPage() {
               <span style={{ fontSize: 11, color: '#666' }}>{profile.moodStatus}</span>
             </Popup>
           </Marker>
-
-          {/* Traveler markers */}
           {visibleTravelers.map((t) => {
             const isEnigma = t.visibility === 'enigma';
             const pos = nearbyCoords(userPos[0], userPos[1], t.radarX, t.radarY);
@@ -321,59 +208,144 @@ export default function RadarPage() {
         </MapContainer>
       </div>
 
-      {/* ── TRAVELER POPUP ── */}
-      {selected && (
-        <div
-          className={`relative z-20 mx-4 mb-3 px-4 py-4 rounded-2xl border animate-slide-up ${
-            isNight
-              ? 'bg-night-card border-night-border shadow-card-night'
-              : 'bg-white border-day-border shadow-card-day'
-          }`}
-        >
+      {/* ── TOP HEADER (floating) ── */}
+      <header className="absolute top-0 left-0 right-0 z-20 px-4 pt-12 pb-2 pointer-events-none">
+        <div className={`flex items-center justify-between px-4 py-2.5 rounded-2xl border ${glass} pointer-events-auto`}>
+          <div className="flex items-center gap-2">
+            <Navigation size={13} className={isNight ? 'text-amber-400' : 'text-amber-600'} />
+            <span className={`text-xs font-mono ${isNight ? 'text-amber-400/80' : 'text-amber-700/80'}`}>
+              {profile.route}
+            </span>
+          </div>
           <div className="flex items-center gap-3">
-            <HexAvatar
-              initial={selected.visibility === 'enigma' ? '?' : selected.avatarInitial}
-              color={selected.visibility === 'enigma' ? 'from-slate-600 to-slate-700' : selected.avatarColor}
-              size={42}
-              glow
-            />
-            <div className="flex-1 min-w-0">
-              <p className={`font-semibold text-sm ${isNight ? 'text-white' : 'text-day-text'}`}>
-                {selected.visibility === 'enigma' ? '~enigma' : `@${selected.username}`}
-              </p>
-              {selected.moodStatus && selected.visibility !== 'enigma' && (
-                <p className={`text-xs mt-0.5 truncate ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {selected.moodStatus}
-                </p>
-              )}
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-sm">{TRANSPORT_ICONS[selected.transport] ?? '🚌'}</span>
-                <span className={`text-[10px] ${isNight ? 'text-slate-500' : 'text-slate-400'}`}>
-                  {selected.route} · {selected.distance}m
-                </span>
+            {temperature !== null && (
+              <div className={`flex items-center gap-1 text-[11px] font-mono font-semibold ${isNight ? 'text-slate-300' : 'text-slate-600'}`}>
+                <Thermometer size={12} />
+                <span>{temperature}°C</span>
               </div>
+            )}
+            <div className={`flex items-center gap-1 text-[11px] font-mono ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
+              <MapPin size={12} />
+              <span>{visibleTravelers.length} cerca</span>
             </div>
-            <a
-              href="/chats"
-              className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+            <button
+              onClick={() => setShowSimBar((v) => !v)}
+              className={`text-[9px] px-2 py-0.5 rounded-full border font-mono transition-colors ${
                 isNight
-                  ? 'bg-radar-gold/15 text-radar-gold border border-radar-gold/30 hover:bg-radar-gold/25'
-                  : 'bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200'
+                  ? 'border-amber-500/30 text-slate-500 hover:text-amber-400 hover:border-amber-400/50'
+                  : 'border-slate-300 text-slate-400 hover:text-amber-600'
               }`}
             >
-              Conectar
-            </a>
+              SIM
+            </button>
+          </div>
+        </div>
+
+        {/* Hour simulator — also floating below header */}
+        {showSimBar && (
+          <div className={`mt-2 px-4 py-3 rounded-xl border flex items-center gap-3 ${glass} pointer-events-auto`}>
+            <span className={`text-xs font-medium ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
+              Hora: {simHour ?? hour}:00
+            </span>
+            <input
+              type="range" min={0} max={23} step={1}
+              value={simHour ?? hour}
+              onChange={(e) => setSimHour(Number(e.target.value))}
+              className="flex-1 accent-amber-500 h-1.5"
+            />
+            <button
+              onClick={() => setSimHour(null)}
+              className="text-[10px] text-amber-500 hover:text-amber-400 font-medium"
+            >
+              Real
+            </button>
+          </div>
+        )}
+      </header>
+
+      {/* ── MOOD BOX (floating top, below header) ── */}
+      <div className="absolute left-4 right-4 z-20" style={{ top: 110 }}>
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border ${glass}`}>
+          <div className="flex-shrink-0">
+            <HexAvatar initial={profile.avatarInitial} color={profile.avatarColor} size={38} glow />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className={`text-[9px] font-bold tracking-widest mb-1 ${isNight ? 'text-amber-400/60' : 'text-amber-600/70'}`}>
+              TU SENTIR HOY
+            </p>
+            {editingMood ? (
+              <input
+                autoFocus
+                value={moodDraft}
+                onChange={(e) => setMoodDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveMood()}
+                maxLength={60}
+                className={`w-full text-sm font-medium bg-transparent border-b outline-none ${
+                  isNight ? 'text-white border-amber-400/50' : 'text-slate-800 border-amber-400/60'
+                }`}
+              />
+            ) : (
+              <p className={`text-sm font-medium truncate ${isNight ? 'text-white' : 'text-slate-800'}`}>
+                {profile.moodStatus || <span className="opacity-40 italic text-xs">Escribe tu estado...</span>}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => editingMood ? saveMood() : setEditingMood(true)}
+            className={`flex-shrink-0 p-1.5 rounded-lg transition-all ${
+              isNight ? 'text-amber-400/60 hover:text-amber-400 hover:bg-amber-400/10' : 'text-amber-500 hover:bg-amber-50'
+            }`}
+          >
+            {editingMood ? <Check size={15} /> : <Pencil size={13} />}
+          </button>
+        </div>
+      </div>
+
+      {/* ── TRAVELER POPUP (floating, mid-screen) ── */}
+      {selected && (
+        <div className="absolute left-4 right-4 z-20" style={{ top: 200 }}>
+          <div className={`px-4 py-4 rounded-2xl border animate-slide-up ${glass}`}>
+            <div className="flex items-center gap-3">
+              <HexAvatar
+                initial={selected.visibility === 'enigma' ? '?' : selected.avatarInitial}
+                color={selected.visibility === 'enigma' ? 'from-slate-600 to-slate-700' : selected.avatarColor}
+                size={42}
+                glow
+              />
+              <div className="flex-1 min-w-0">
+                <p className={`font-semibold text-sm ${isNight ? 'text-white' : 'text-slate-800'}`}>
+                  {selected.visibility === 'enigma' ? '~enigma' : `@${selected.username}`}
+                </p>
+                {selected.moodStatus && selected.visibility !== 'enigma' && (
+                  <p className={`text-xs mt-0.5 truncate ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
+                    {selected.moodStatus}
+                  </p>
+                )}
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-sm">{TRANSPORT_ICONS[selected.transport] ?? '🚌'}</span>
+                  <span className={`text-[10px] ${isNight ? 'text-slate-500' : 'text-slate-400'}`}>
+                    {selected.route} · {selected.distance}m
+                  </span>
+                </div>
+              </div>
+              <a
+                href="/chats"
+                className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                  isNight
+                    ? 'bg-amber-400/15 text-amber-400 border border-amber-400/30 hover:bg-amber-400/25'
+                    : 'bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200'
+                }`}
+              >
+                Conectar
+              </a>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ── VISIBILITY CONTROL + "+" BUTTON ── */}
-      <div className="relative z-20 mx-4 mb-4 flex items-center gap-2">
-        <div
-          className={`flex-1 flex items-center rounded-2xl border overflow-hidden ${
-            isNight ? 'bg-night-card border-night-border' : 'bg-white border-day-border'
-          }`}
-        >
+      {/* ── BOTTOM: VISIBILITY + "+" BUTTON (floating) ── */}
+      <div className="absolute bottom-24 left-4 right-4 z-20 flex items-center gap-2">
+        <div className={`flex-1 flex items-center rounded-2xl border overflow-hidden ${glass}`}>
           {VISIBILITY_OPTIONS.map(({ value, label, color }) => (
             <button
               key={value}
@@ -381,8 +353,8 @@ export default function RadarPage() {
               className={`flex-1 py-3 text-[10px] font-bold tracking-widest transition-all duration-200 ${
                 profile.visibility === value
                   ? isNight
-                    ? 'bg-radar-gold/15 text-radar-gold border-r border-radar-gold/20'
-                    : 'bg-amber-50 text-amber-700 border-r border-amber-100'
+                    ? 'bg-amber-400/15 text-amber-400'
+                    : 'bg-amber-50 text-amber-700'
                   : `${color} opacity-40 hover:opacity-70`
               }`}
             >
@@ -391,12 +363,11 @@ export default function RadarPage() {
           ))}
         </div>
 
-        {/* "+" floating action button */}
         <button
           onClick={showVibesToast}
           className={`flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center border transition-all active:scale-95 ${
             isNight
-              ? 'bg-radar-gold/15 border-radar-gold/30 text-radar-gold hover:bg-radar-gold/25 shadow-neon-gold'
+              ? 'bg-amber-400/15 border-amber-400/30 text-amber-400 hover:bg-amber-400/25'
               : 'bg-amber-100 border-amber-200 text-amber-700 hover:bg-amber-200'
           }`}
         >
@@ -406,12 +377,8 @@ export default function RadarPage() {
 
       {/* ── TOAST ── */}
       {toast && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
-          <div className={`px-5 py-3 rounded-2xl text-sm font-medium shadow-lg border ${
-            isNight
-              ? 'bg-night-card border-night-border text-white'
-              : 'bg-white border-day-border text-day-text shadow-card-day'
-          }`}>
+        <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
+          <div className={`px-5 py-3 rounded-2xl text-sm font-medium shadow-lg border ${glass}`}>
             Proxímamente: dejar un Vibe en el mapa
           </div>
         </div>
