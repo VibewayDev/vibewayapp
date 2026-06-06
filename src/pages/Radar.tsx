@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Pencil, Check, MapPin, Navigation, Plus, Thermometer } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import iconUrl from 'leaflet/dist/images/marker-icon.png';
 import iconShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -97,6 +97,14 @@ function nearbyCoords(lat: number, lng: number, radarX: number, radarY: number):
   return [lat + radarY * spread, lng + radarX * spread];
 }
 
+function MapController({ position }: { position: [number, number] }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(position, map.getZoom(), { animate: true });
+  }, [position]);
+  return null;
+}
+
 const DEFAULT_CENTER: [number, number] = [-33.45, -70.65];
 
 export default function RadarPage() {
@@ -108,6 +116,7 @@ export default function RadarPage() {
   const [selected, setSelected]       = useState<NearbyTraveler | null>(null);
   const [showSimBar, setShowSimBar]   = useState(false);
   const [userPos, setUserPos]         = useState<[number, number]>(DEFAULT_CENTER);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [temperature, setTemperature] = useState<number | null>(null);
   const [toast, setToast]             = useState(false);
   const isNight = theme === 'night';
@@ -119,10 +128,16 @@ export default function RadarPage() {
   }, []);
 
   useEffect(() => {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setUserPos([pos.coords.latitude, pos.coords.longitude]),
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const newPos: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+        setUserPos(newPos);
+        setGpsAccuracy(Math.round(pos.coords.accuracy));
+      },
       () => setUserPos(DEFAULT_CENTER),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 },
     );
+    return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
   useEffect(() => {
@@ -158,17 +173,18 @@ export default function RadarPage() {
       <div className="absolute inset-0 z-0">
         <MapContainer
           center={userPos}
-          zoom={15}
+          zoom={13}
           style={{ width: '100%', height: '100%' }}
           zoomControl={false}
         >
+          <MapController position={userPos} />
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           />
           <Circle
             center={userPos}
-            radius={500}
+            radius={5000}
             pathOptions={{
               color: '#7c3aed',
               fillColor: '#7c3aed',
@@ -228,6 +244,16 @@ export default function RadarPage() {
               <MapPin size={12} />
               <span>{visibleTravelers.length} cerca</span>
             </div>
+            {gpsAccuracy !== null && (
+              <div className={`flex items-center gap-0.5 text-[11px] font-mono font-semibold ${
+                gpsAccuracy <= 100
+                  ? 'text-emerald-400'
+                  : 'text-orange-400'
+              }`}>
+                <span>🎯</span>
+                <span>{gpsAccuracy}m</span>
+              </div>
+            )}
             <button
               onClick={() => setShowSimBar((v) => !v)}
               className={`text-[9px] px-2 py-0.5 rounded-full border font-mono transition-colors ${
