@@ -57,20 +57,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signUp(email: string, password: string, username: string) {
+    // Step 1: create the auth user
     const { data, error } = await supabase.auth.signUp({ email, password });
+    console.log('[signUp] auth.signUp result:', { userId: data?.user?.id, error });
     if (error) return { error: translateError(error.message) };
-    if (data.user) {
-      await supabase.from('profiles').insert({
-        id: data.user.id,
+
+    // Step 2: sign in immediately — confirm email is disabled in Supabase
+    const { data: signInData, error: signInError } =
+      await supabase.auth.signInWithPassword({ email, password });
+    console.log('[signUp] signInWithPassword result:', { session: !!signInData?.session, error: signInError });
+    if (signInError) return { error: translateError(signInError.message) };
+
+    // Step 3: insert profile now that the session is active (RLS requires auth)
+    const userId = signInData.user?.id ?? data.user?.id;
+    if (userId) {
+      const { error: profileError } = await supabase.from('profiles').insert({
+        id: userId,
         username,
         transport_mode: 'bus',
         status_text: 'En camino',
         visibility: 'public',
       });
-      // Confirm email is disabled — sign in immediately so the session is active
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-      if (signInError) return { error: translateError(signInError.message) };
+      console.log('[signUp] profiles.insert error:', profileError);
     }
+
     return { error: null };
   }
 
