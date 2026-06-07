@@ -167,7 +167,7 @@ export default function RadarPage() {
   const glass = isNight ? glassNight : glassDay;
 
   return (
-    <div className="relative w-full h-screen overflow-hidden">
+    <div className="fixed inset-0 w-full h-full overflow-hidden">
 
       {/* ── FULLSCREEN MAP (base layer) ── */}
       <div className="absolute inset-0 z-0">
