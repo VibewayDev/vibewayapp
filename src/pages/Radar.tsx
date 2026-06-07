@@ -27,7 +27,6 @@ const TRANSPORT_ICONS: Record<string, string> = {
   bus: '🚌', metro: '🚇', train: '🚆', tram: '🚃', ferry: '⛴️', car: '🚗', walking: '🚶',
 };
 
-// Haversine distance in metres between two lat/lng points
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R  = 6_371_000;
   const dL = ((lat2 - lat1) * Math.PI) / 180;
@@ -164,20 +163,20 @@ export default function RadarPage() {
   useEffect(() => { userPosRef.current    = userPos; },            [userPos]);
   useEffect(() => { visibilityRef.current = profile.visibility; }, [profile.visibility]);
 
+  // Connectivity module (simulated travelers)
   useEffect(() => {
     connectivity.start();
     const unsub = connectivity.onTravelers(setTravelers);
     return () => { unsub(); connectivity.stop(); };
   }, []);
 
+  // GPS watchPosition — publica posición en Supabase en cada actualización
   useEffect(() => {
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
         const newPos: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         setUserPos(newPos);
         setGpsAccuracy(Math.round(pos.coords.accuracy));
-
-        // Publish position immediately on every GPS update (not only in the interval)
         if (user?.id && visibilityRef.current !== 'off') {
           supabase.from('profiles').update({
             last_lat:  pos.coords.latitude,
@@ -194,6 +193,7 @@ export default function RadarPage() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, [user]);
 
+  // Temperatura desde Open-Meteo
   useEffect(() => {
     const [lat, lon] = userPos;
     fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`)
@@ -202,52 +202,42 @@ export default function RadarPage() {
       .catch(() => {});
   }, [userPos]);
 
-  // Publish own position every 30 s via interval (belt-and-suspenders with the GPS watcher)
+  // Publicar posición cada 30s (respaldo del watchPosition)
   useEffect(() => {
     if (!user?.id) return;
     async function publishPosition() {
       if (visibilityRef.current === 'off') return;
       const [lat, lng] = userPosRef.current;
-      const { error } = await supabase.from('profiles').update({
+      await supabase.from('profiles').update({
         last_lat:  lat,
         last_lng:  lng,
         last_seen: new Date().toISOString(),
       }).eq('id', user!.id);
-      if (error) console.error('[Radar] interval publish error:', error.message);
     }
     publishPosition();
     const id = setInterval(publishPosition, 30_000);
     return () => clearInterval(id);
   }, [user]);
 
-  // Fetch other users seen within last 30 min, filter to 5 km radius client-side
+  // Carga inicial de viajeros reales
   useEffect(() => {
+    if (!user?.id) return;
     async function fetchLive() {
-      // Don't query until we have a real user session
-      if (!user?.id) return;
-
       const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('profiles')
         .select('id, username, avatar_url, last_lat, last_lng, visibility')
-        .neq('id', user.id)
+        .neq('id', user!.id)
         .gte('last_seen', cutoff)
         .not('last_lat', 'is', null)
         .not('last_lng', 'is', null)
         .neq('visibility', 'off');
 
-      if (error) {
-        console.error('[Radar] fetchLive error:', error.message);
-        return;
-      }
-
       if (data) {
         const [myLat, myLng] = userPosRef.current;
         setLiveTravelers(
           data
-            .filter((r) =>
-              haversineM(myLat, myLng, r.last_lat as number, r.last_lng as number) <= RADAR_RADIUS_M,
-            )
+            .filter((r) => haversineM(myLat, myLng, r.last_lat as number, r.last_lng as number) <= RADAR_RADIUS_M)
             .map((r) => ({
               id:         r.id,
               username:   r.username,
@@ -260,23 +250,71 @@ export default function RadarPage() {
       }
     }
     fetchLive();
-    const id = setInterval(fetchLive, 30_000);
-    return () => clearInterval(id);
+  }, [user]);
+
+  // ── SUPABASE REALTIME — actualización instantánea de posiciones ──
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel('live-travelers')
+      .on(
+        'postgres_changes',
+        {
+          event:  'UPDATE',
+          schema: 'public',
+          table:  'profiles',
+        },
+        (payload) => {
+          const p = payload.new as {
+            id: string; username: string; avatar_url: string | null;
+            last_lat: number | null; last_lng: number | null;
+            visibility: string; last_seen: string;
+          };
+
+          // Ignorar propio perfil o usuarios apagados o sin coordenadas
+          if (p.id === user.id) return;
+          if (p.visibility === 'off') {
+            setLiveTravelers((prev) => prev.filter((t) => t.id !== p.id));
+            return;
+          }
+          if (!p.last_lat || !p.last_lng) return;
+
+          const dist = haversineM(userPosRef.current[0], userPosRef.current[1], p.last_lat, p.last_lng);
+
+          if (dist > RADAR_RADIUS_M) {
+            // Salió del radio — eliminarlo
+            setLiveTravelers((prev) => prev.filter((t) => t.id !== p.id));
+            return;
+          }
+
+          // Actualizar o agregar al mapa instantáneamente
+          setLiveTravelers((prev) => {
+            const exists = prev.find((t) => t.id === p.id);
+            const updated: LiveTraveler = {
+              id:         p.id,
+              username:   p.username,
+              avatar_url: p.avatar_url,
+              lat:        p.last_lat!,
+              lng:        p.last_lng!,
+              visibility: p.visibility,
+            };
+            if (exists) return prev.map((t) => t.id === p.id ? updated : t);
+            return [...prev, updated];
+          });
+        },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [user]);
 
   function saveMood() { setMood(moodDraft); setEditingMood(false); }
+  function showVibesToast() { setToast(true); setTimeout(() => setToast(false), 3000); }
 
-  function showVibesToast() {
-    setToast(true);
-    setTimeout(() => setToast(false), 3000);
-  }
+  const visibleTravelers = travelers.filter((t) => profile.visibility !== 'off' && t.visibility !== 'off');
+  const visibleLive      = liveTravelers.filter((t) => t.visibility !== 'off');
 
-  const visibleTravelers = travelers.filter(
-    (t) => profile.visibility !== 'off' && t.visibility !== 'off',
-  );
-  const visibleLive = liveTravelers.filter((t) => t.visibility !== 'off');
-
-  // Avatar for the current user (from Supabase DB)
   const myAvatarUrl   = authProfile?.avatar_url ?? null;
   const myInitial     = (authProfile?.username ?? profile.username)[0]?.toUpperCase() ?? 'T';
   const myDisplayName = authProfile?.username ?? profile.username;
@@ -307,16 +345,15 @@ export default function RadarPage() {
             pathOptions={{ color: '#f5a623', fillColor: '#f5a623', fillOpacity: 0.04, weight: 1.5, dashArray: '6 4' }}
           />
 
-          {/* Current user marker */}
+          {/* Marcador del usuario actual */}
           <Marker position={userPos} icon={buildUserIcon(myInitial, myAvatarUrl)}>
             <Popup>
-              <strong>@{myDisplayName}</strong>
-              <br />
+              <strong>@{myDisplayName}</strong><br />
               <span style={{ fontSize: 11, color: '#666' }}>{authProfile?.status_text || profile.moodStatus}</span>
             </Popup>
           </Marker>
 
-          {/* Simulated travelers (connectivity module) */}
+          {/* Viajeros simulados */}
           {visibleTravelers.map((t) => {
             const isEnigma = t.visibility === 'enigma';
             const pos = nearbyCoords(userPos[0], userPos[1], t.radarX, t.radarY);
@@ -329,9 +366,7 @@ export default function RadarPage() {
               >
                 <Popup>
                   <strong>{isEnigma ? '~enigma' : `@${t.username}`}</strong>
-                  {!isEnigma && t.moodStatus && (
-                    <><br /><span style={{ fontSize: 11, color: '#666' }}>{t.moodStatus}</span></>
-                  )}
+                  {!isEnigma && t.moodStatus && (<><br /><span style={{ fontSize: 11, color: '#666' }}>{t.moodStatus}</span></>)}
                   <br />
                   <span style={{ fontSize: 11 }}>{TRANSPORT_ICONS[t.transport] ?? '🚌'} {t.route} · {t.distance}m</span>
                 </Popup>
@@ -339,7 +374,7 @@ export default function RadarPage() {
             );
           })}
 
-          {/* Real users from Supabase */}
+          {/* Viajeros reales desde Supabase Realtime */}
           {visibleLive.map((t) => {
             const isEnigma = t.visibility === 'enigma';
             const initial  = t.username?.[0]?.toUpperCase() ?? '?';
@@ -363,15 +398,12 @@ export default function RadarPage() {
         <div className={`flex items-center justify-between px-4 py-2.5 rounded-2xl border ${glass} pointer-events-auto`}>
           <div className="flex items-center gap-2">
             <Navigation size={13} className={isNight ? 'text-amber-400' : 'text-amber-600'} />
-            <span className={`text-xs font-mono ${isNight ? 'text-amber-400/80' : 'text-amber-700/80'}`}>
-              {profile.route}
-            </span>
+            <span className={`text-xs font-mono ${isNight ? 'text-amber-400/80' : 'text-amber-700/80'}`}>{profile.route}</span>
           </div>
           <div className="flex items-center gap-3">
             {temperature !== null && (
               <div className={`flex items-center gap-1 text-[11px] font-mono font-semibold ${isNight ? 'text-slate-300' : 'text-slate-600'}`}>
-                <Thermometer size={12} />
-                <span>{temperature}°C</span>
+                <Thermometer size={12} /><span>{temperature}°C</span>
               </div>
             )}
             <div className={`flex items-center gap-1 text-[11px] font-mono ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -380,37 +412,23 @@ export default function RadarPage() {
             </div>
             {gpsAccuracy !== null && (
               <div className={`flex items-center gap-0.5 text-[11px] font-mono font-semibold ${gpsAccuracy <= 100 ? 'text-emerald-400' : 'text-orange-400'}`}>
-                <span>🎯</span>
-                <span>{gpsAccuracy}m</span>
+                <span>🎯</span><span>{gpsAccuracy}m</span>
               </div>
             )}
             <button
               onClick={() => setShowSimBar((v) => !v)}
               className={`text-[9px] px-2 py-0.5 rounded-full border font-mono transition-colors ${
-                isNight
-                  ? 'border-amber-500/30 text-slate-500 hover:text-amber-400 hover:border-amber-400/50'
-                  : 'border-slate-300 text-slate-400 hover:text-amber-600'
+                isNight ? 'border-amber-500/30 text-slate-500 hover:text-amber-400' : 'border-slate-300 text-slate-400 hover:text-amber-600'
               }`}
-            >
-              SIM
-            </button>
+            >SIM</button>
           </div>
         </div>
-
         {showSimBar && (
           <div className={`mt-2 px-4 py-3 rounded-xl border flex items-center gap-3 ${glass} pointer-events-auto`}>
-            <span className={`text-xs font-medium ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
-              Hora: {simHour ?? hour}:00
-            </span>
-            <input
-              type="range" min={0} max={23} step={1}
-              value={simHour ?? hour}
-              onChange={(e) => setSimHour(Number(e.target.value))}
-              className="flex-1 accent-amber-500 h-1.5"
-            />
-            <button onClick={() => setSimHour(null)} className="text-[10px] text-amber-500 hover:text-amber-400 font-medium">
-              Real
-            </button>
+            <span className={`text-xs font-medium ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>Hora: {simHour ?? hour}:00</span>
+            <input type="range" min={0} max={23} step={1} value={simHour ?? hour}
+              onChange={(e) => setSimHour(Number(e.target.value))} className="flex-1 accent-amber-500 h-1.5" />
+            <button onClick={() => setSimHour(null)} className="text-[10px] text-amber-500 font-medium">Real</button>
           </div>
         )}
       </header>
@@ -419,41 +437,22 @@ export default function RadarPage() {
       <div className="absolute left-4 right-4 z-20" style={{ top: 110 }}>
         <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border ${glass}`}>
           <div className="flex-shrink-0">
-            <HexAvatar
-              initial={myInitial}
-              color={profile.avatarColor}
-              avatarUrl={myAvatarUrl}
-              size={38}
-              glow
-            />
+            <HexAvatar initial={myInitial} color={profile.avatarColor} avatarUrl={myAvatarUrl} size={38} glow />
           </div>
           <div className="flex-1 min-w-0">
-            <p className={`text-[9px] font-bold tracking-widest mb-1 ${isNight ? 'text-amber-400/60' : 'text-amber-600/70'}`}>
-              TU SENTIR HOY
-            </p>
+            <p className={`text-[9px] font-bold tracking-widest mb-1 ${isNight ? 'text-amber-400/60' : 'text-amber-600/70'}`}>TU SENTIR HOY</p>
             {editingMood ? (
-              <input
-                autoFocus
-                value={moodDraft}
-                onChange={(e) => setMoodDraft(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && saveMood()}
-                maxLength={60}
-                className={`w-full text-sm font-medium bg-transparent border-b outline-none ${
-                  isNight ? 'text-white border-amber-400/50' : 'text-slate-800 border-amber-400/60'
-                }`}
-              />
+              <input autoFocus value={moodDraft} onChange={(e) => setMoodDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveMood()} maxLength={60}
+                className={`w-full text-sm font-medium bg-transparent border-b outline-none ${isNight ? 'text-white border-amber-400/50' : 'text-slate-800 border-amber-400/60'}`} />
             ) : (
               <p className={`text-sm font-medium truncate ${isNight ? 'text-white' : 'text-slate-800'}`}>
                 {authProfile?.status_text || profile.moodStatus || <span className="opacity-40 italic text-xs">Escribe tu estado...</span>}
               </p>
             )}
           </div>
-          <button
-            onClick={() => editingMood ? saveMood() : setEditingMood(true)}
-            className={`flex-shrink-0 p-1.5 rounded-lg transition-all ${
-              isNight ? 'text-amber-400/60 hover:text-amber-400 hover:bg-amber-400/10' : 'text-amber-500 hover:bg-amber-50'
-            }`}
-          >
+          <button onClick={() => editingMood ? saveMood() : setEditingMood(true)}
+            className={`flex-shrink-0 p-1.5 rounded-lg transition-all ${isNight ? 'text-amber-400/60 hover:text-amber-400' : 'text-amber-500 hover:bg-amber-50'}`}>
             {editingMood ? <Check size={15} /> : <Pencil size={13} />}
           </button>
         </div>
@@ -464,36 +463,22 @@ export default function RadarPage() {
         <div className="absolute left-4 right-4 z-20" style={{ top: 200 }}>
           <div className={`px-4 py-4 rounded-2xl border animate-slide-up ${glass}`}>
             <div className="flex items-center gap-3">
-              <HexAvatar
-                initial={selected.visibility === 'enigma' ? '?' : selected.avatarInitial}
-                color={selected.visibility === 'enigma' ? 'from-slate-600 to-slate-700' : selected.avatarColor}
-                size={42}
-                glow
-              />
+              <HexAvatar initial={selected.visibility === 'enigma' ? '?' : selected.avatarInitial}
+                color={selected.visibility === 'enigma' ? 'from-slate-600 to-slate-700' : selected.avatarColor} size={42} glow />
               <div className="flex-1 min-w-0">
                 <p className={`font-semibold text-sm ${isNight ? 'text-white' : 'text-slate-800'}`}>
                   {selected.visibility === 'enigma' ? '~enigma' : `@${selected.username}`}
                 </p>
                 {selected.moodStatus && selected.visibility !== 'enigma' && (
-                  <p className={`text-xs mt-0.5 truncate ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {selected.moodStatus}
-                  </p>
+                  <p className={`text-xs mt-0.5 truncate ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>{selected.moodStatus}</p>
                 )}
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-sm">{TRANSPORT_ICONS[selected.transport] ?? '🚌'}</span>
-                  <span className={`text-[10px] ${isNight ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {selected.route} · {selected.distance}m
-                  </span>
+                  <span className={`text-[10px] ${isNight ? 'text-slate-500' : 'text-slate-400'}`}>{selected.route} · {selected.distance}m</span>
                 </div>
               </div>
-              <a
-                href="/chats"
-                className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  isNight
-                    ? 'bg-amber-400/15 text-amber-400 border border-amber-400/30 hover:bg-amber-400/25'
-                    : 'bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200'
-                }`}
-              >
+              <a href="/chats" className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                isNight ? 'bg-amber-400/15 text-amber-400 border border-amber-400/30' : 'bg-amber-100 text-amber-700 border border-amber-200'}`}>
                 Conectar
               </a>
             </div>
@@ -501,31 +486,21 @@ export default function RadarPage() {
         </div>
       )}
 
-      {/* ── VISIBILITY + "+" BUTTON ── */}
+      {/* ── VISIBILITY + "+" ── */}
       <div className="absolute bottom-24 left-4 right-4 z-20 flex items-center gap-2">
         <div className={`flex-1 flex items-center rounded-2xl border overflow-hidden ${glass}`}>
           {VISIBILITY_OPTIONS.map(({ value, label, color }) => (
-            <button
-              key={value}
-              onClick={() => setVisibility(value)}
+            <button key={value} onClick={() => setVisibility(value)}
               className={`flex-1 py-3 text-[10px] font-bold tracking-widest transition-all duration-200 ${
                 profile.visibility === value
                   ? isNight ? 'bg-amber-400/15 text-amber-400' : 'bg-amber-50 text-amber-700'
                   : `${color} opacity-40 hover:opacity-70`
-              }`}
-            >
-              {label}
-            </button>
+              }`}>{label}</button>
           ))}
         </div>
-        <button
-          onClick={showVibesToast}
+        <button onClick={showVibesToast}
           className={`flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center border transition-all active:scale-95 ${
-            isNight
-              ? 'bg-amber-400/15 border-amber-400/30 text-amber-400 hover:bg-amber-400/25'
-              : 'bg-amber-100 border-amber-200 text-amber-700 hover:bg-amber-200'
-          }`}
-        >
+            isNight ? 'bg-amber-400/15 border-amber-400/30 text-amber-400' : 'bg-amber-100 border-amber-200 text-amber-700'}`}>
           <Plus size={18} />
         </button>
       </div>
@@ -534,7 +509,7 @@ export default function RadarPage() {
       {toast && (
         <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
           <div className={`px-5 py-3 rounded-2xl text-sm font-medium shadow-lg border ${glass}`}>
-            Proxímamente: dejar un Vibe en el mapa
+            Próximamente: dejar un Vibe en el mapa
           </div>
         </div>
       )}
