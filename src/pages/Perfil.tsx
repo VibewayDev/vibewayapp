@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Pencil, Check, MapPin, Shield, Clock, ChevronRight, LogOut, Camera, X } from 'lucide-react';
 import { useTheme } from '../lib/timeTheme';
 import { useProfile } from '../lib/profileContext';
@@ -28,7 +28,7 @@ const HISTORY = [
 export default function Perfil() {
   const { theme } = useTheme();
   const { profile, setMood, setTransport } = useProfile();
-  const { signOut, updateProfile } = useAuth();
+  const { signOut, updateProfile, profile: authProfile } = useAuth();
   const isNight = theme === 'night';
 
   const [moodDraft, setMoodDraft]       = useState(profile.moodStatus);
@@ -36,6 +36,11 @@ export default function Perfil() {
   const [avatarModal, setAvatarModal]   = useState(false);
   const [avatarUrl, setAvatarUrl]       = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Load avatar_url from Supabase profile on mount
+  useEffect(() => {
+    if (authProfile?.avatar_url) setAvatarUrl(authProfile.avatar_url);
+  }, [authProfile?.avatar_url]);
 
   const bg      = isNight ? 'bg-night-base'       : 'bg-day-base';
   const card    = isNight ? 'bg-night-card'       : 'bg-white';

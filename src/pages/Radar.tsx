@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Pencil, Check, MapPin, Navigation, Plus, Thermometer } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -7,7 +7,18 @@ import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 import { connectivity, type NearbyTraveler } from '../lib/connectivity';
 import { useTheme } from '../lib/timeTheme';
 import { useProfile } from '../lib/profileContext';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import type { VisibilityMode } from '../lib/connectivity';
+
+interface LiveTraveler {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  lat: number;
+  lng: number;
+  visibility: string;
+}
 
 const DefaultIcon = L.icon({ iconUrl, shadowUrl: iconShadow });
 L.Marker.mergeOptions({ icon: DefaultIcon });
@@ -110,16 +121,24 @@ const DEFAULT_CENTER: [number, number] = [-33.45, -70.65];
 export default function RadarPage() {
   const { theme, hour, setSimHour, simHour } = useTheme();
   const { profile, setMood, setVisibility } = useProfile();
-  const [travelers, setTravelers]     = useState<NearbyTraveler[]>([]);
-  const [editingMood, setEditingMood] = useState(false);
-  const [moodDraft, setMoodDraft]     = useState(profile.moodStatus);
-  const [selected, setSelected]       = useState<NearbyTraveler | null>(null);
-  const [showSimBar, setShowSimBar]   = useState(false);
-  const [userPos, setUserPos]         = useState<[number, number]>(DEFAULT_CENTER);
-  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
-  const [temperature, setTemperature] = useState<number | null>(null);
-  const [toast, setToast]             = useState(false);
+  const { user } = useAuth();
+  const [travelers, setTravelers]         = useState<NearbyTraveler[]>([]);
+  const [liveTravelers, setLiveTravelers] = useState<LiveTraveler[]>([]);
+  const [editingMood, setEditingMood]     = useState(false);
+  const [moodDraft, setMoodDraft]         = useState(profile.moodStatus);
+  const [selected, setSelected]           = useState<NearbyTraveler | null>(null);
+  const [showSimBar, setShowSimBar]       = useState(false);
+  const [userPos, setUserPos]             = useState<[number, number]>(DEFAULT_CENTER);
+  const [gpsAccuracy, setGpsAccuracy]     = useState<number | null>(null);
+  const [temperature, setTemperature]     = useState<number | null>(null);
+  const [toast, setToast]                 = useState(false);
   const isNight = theme === 'night';
+
+  // Keep a ref to current values for the interval callbacks
+  const userPosRef    = useRef(userPos);
+  const visibilityRef = useRef(profile.visibility);
+  useEffect(() => { userPosRef.current    = userPos; },          [userPos]);
+  useEffect(() => { visibilityRef.current = profile.visibility; }, [profile.visibility]);
 
   useEffect(() => {
     connectivity.start();
@@ -148,6 +167,51 @@ export default function RadarPage() {
       .catch(() => {});
   }, [userPos]);
 
+  // Publish own position to Supabase every 30 s (only when public/enigma)
+  useEffect(() => {
+    if (!user) return;
+    async function publishPosition() {
+      if (visibilityRef.current === 'off') return;
+      const [lat, lng] = userPosRef.current;
+      await supabase.from('profiles').update({
+        last_lat: lat,
+        last_lng: lng,
+        last_seen: new Date().toISOString(),
+      }).eq('id', user!.id);
+    }
+    publishPosition();
+    const id = setInterval(publishPosition, 30_000);
+    return () => clearInterval(id);
+  }, [user]);
+
+  // Read other users' positions every 30 s
+  useEffect(() => {
+    async function fetchLive() {
+      const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url, last_lat, last_lng, visibility')
+        .neq('id', user?.id ?? '')
+        .gte('last_seen', cutoff)
+        .not('last_lat', 'is', null);
+      if (data) {
+        setLiveTravelers(
+          data.map((r) => ({
+            id:         r.id,
+            username:   r.username,
+            avatar_url: r.avatar_url,
+            lat:        r.last_lat as number,
+            lng:        r.last_lng as number,
+            visibility: r.visibility ?? 'public',
+          })),
+        );
+      }
+    }
+    fetchLive();
+    const id = setInterval(fetchLive, 30_000);
+    return () => clearInterval(id);
+  }, [user]);
+
   function saveMood() {
     setMood(moodDraft);
     setEditingMood(false);
@@ -161,6 +225,8 @@ export default function RadarPage() {
   const visibleTravelers = travelers.filter(
     (t) => profile.visibility !== 'off' && t.visibility !== 'off',
   );
+
+  const visibleLive = liveTravelers.filter((t) => t.visibility !== 'off');
 
   const glassNight = 'bg-[#0a1628]/80 border-amber-500/20 backdrop-blur-md';
   const glassDay   = 'bg-white/85 border-slate-200/80 backdrop-blur-md shadow-sm';
@@ -221,6 +287,23 @@ export default function RadarPage() {
               </Marker>
             );
           })}
+
+          {/* Real users from Supabase */}
+          {visibleLive.map((t) => {
+            const isEnigma = t.visibility === 'enigma';
+            const initial  = t.username?.[0]?.toUpperCase() ?? '?';
+            return (
+              <Marker
+                key={t.id}
+                position={[t.lat, t.lng]}
+                icon={buildTravelerIcon(initial, isEnigma)}
+              >
+                <Popup>
+                  <strong>{isEnigma ? '~enigma' : `@${t.username}`}</strong>
+                </Popup>
+              </Marker>
+            );
+          })}
         </MapContainer>
       </div>
 
@@ -242,7 +325,7 @@ export default function RadarPage() {
             )}
             <div className={`flex items-center gap-1 text-[11px] font-mono ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
               <MapPin size={12} />
-              <span>{visibleTravelers.length} cerca</span>
+              <span>{visibleTravelers.length + visibleLive.length} cerca</span>
             </div>
             {gpsAccuracy !== null && (
               <div className={`flex items-center gap-0.5 text-[11px] font-mono font-semibold ${
