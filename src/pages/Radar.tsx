@@ -156,12 +156,15 @@ export default function RadarPage() {
   const [gpsAccuracy, setGpsAccuracy]     = useState<number | null>(null);
   const [temperature, setTemperature]     = useState<number | null>(null);
   const [toast, setToast]                 = useState(false);
+  const [gpsReady, setGpsReady]           = useState(false);
   const isNight = theme === 'night';
 
   const userPosRef    = useRef(userPos);
   const visibilityRef = useRef(profile.visibility);
+  const gpsReadyRef   = useRef(false);
   useEffect(() => { userPosRef.current    = userPos; },            [userPos]);
   useEffect(() => { visibilityRef.current = profile.visibility; }, [profile.visibility]);
+  useEffect(() => { gpsReadyRef.current   = gpsReady; },           [gpsReady]);
 
   // Connectivity module (simulated travelers)
   useEffect(() => {
@@ -177,6 +180,8 @@ export default function RadarPage() {
         const newPos: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         setUserPos(newPos);
         setGpsAccuracy(Math.round(pos.coords.accuracy));
+        setGpsReady(true);
+        gpsReadyRef.current = true;
         if (user?.id && visibilityRef.current !== 'off') {
           supabase.from('profiles').update({
             last_lat:  pos.coords.latitude,
@@ -207,6 +212,7 @@ export default function RadarPage() {
     if (!user?.id) return;
     async function publishPosition() {
       if (visibilityRef.current === 'off') return;
+      if (!gpsReadyRef.current) return; // No publicar hasta tener GPS real
       const [lat, lng] = userPosRef.current;
       await supabase.from('profiles').update({
         last_lat:  lat,
