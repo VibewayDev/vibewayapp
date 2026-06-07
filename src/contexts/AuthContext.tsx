@@ -9,6 +9,7 @@ interface Profile {
   transport_mode: string;
   status_text: string;
   visibility: string;
+  bio: string | null;
 }
 
 interface AuthCtx {
