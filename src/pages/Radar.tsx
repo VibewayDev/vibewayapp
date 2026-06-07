@@ -147,7 +147,7 @@ export default function RadarPage() {
   const { theme, hour, setSimHour, simHour } = useTheme();
   const { profile, setMood, setVisibility }  = useProfile();
   const { user, profile: authProfile }       = useAuth();
-  const { userPos, gpsAccuracy }             = useGps();
+  const { userPos, gpsAccuracy, gpsMode, setGpsMode } = useGps();
   const [travelers, setTravelers]         = useState<NearbyTraveler[]>([]);
   const [liveTravelers, setLiveTravelers] = useState<LiveTraveler[]>([]);
   const [editingMood, setEditingMood]     = useState(false);
@@ -449,9 +449,35 @@ export default function RadarPage() {
         </div>
       )}
 
-      {/* ── VISIBILITY + "+" ── */}
-      <div className="absolute bottom-24 left-4 right-4 z-20 flex items-center gap-2">
-        <div className={`flex-1 flex items-center rounded-2xl border overflow-hidden ${glass}`}>
+      {/* ── VISIBILITY + GPS MODE + "+" ── */}
+      <div className="absolute bottom-24 left-4 right-4 z-20 flex flex-col gap-2">
+        
+        {/* Botón Full GPS / Ahorro GPS */}
+        <button
+          onClick={() => setGpsMode(gpsMode === 'full' ? 'eco' : 'full')}
+          className="self-start flex items-center gap-2 px-3 py-2 rounded-2xl border font-bold text-[11px] transition-all active:scale-95"
+          style={{
+            background: gpsMode === 'full'
+              ? 'linear-gradient(135deg, rgba(255,20,147,0.2), rgba(255,20,147,0.1))'
+              : 'linear-gradient(135deg, rgba(255,140,0,0.2), rgba(255,140,0,0.1))',
+            borderColor: gpsMode === 'full' ? 'rgba(255,20,147,0.5)' : 'rgba(255,140,0,0.5)',
+            color: gpsMode === 'full' ? '#ff1493' : '#ff8c00',
+            boxShadow: gpsMode === 'full'
+              ? '0 0 12px rgba(255,20,147,0.3)'
+              : '0 0 12px rgba(255,140,0,0.3)',
+          }}
+        >
+          <span style={{ fontSize: 16 }}>
+            {gpsMode === 'full' ? '🔋' : '🪫'}
+          </span>
+          <span>{gpsMode === 'full' ? 'Full GPS' : 'Ahorro GPS'}</span>
+          <span className="text-[9px] opacity-60">
+            {gpsMode === 'full' ? '15s' : '2min'}
+          </span>
+        </button>
+
+        <div className="flex items-center gap-2">
+          <div className={`flex-1 flex items-center rounded-2xl border overflow-hidden ${glass}`}>
           {VISIBILITY_OPTIONS.map(({ value, label, color }) => (
             <button key={value} onClick={() => setVisibility(value)}
               className={`flex-1 py-3 text-[10px] font-bold tracking-widest transition-all duration-200 ${
@@ -466,6 +492,7 @@ export default function RadarPage() {
             isNight ? 'bg-amber-400/15 border-amber-400/30 text-amber-400' : 'bg-amber-100 border-amber-200 text-amber-700'}`}>
           <Plus size={18} />
         </button>
+        </div>
       </div>
 
       {/* ── TOAST ── */}
