@@ -27,10 +27,23 @@ const TRANSPORT_ICONS: Record<string, string> = {
   bus: '🚌', metro: '🚇', train: '🚆', tram: '🚃', ferry: '⛴️', car: '🚗', walking: '🚶',
 };
 
+// Haversine distance in metres between two lat/lng points
+function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R  = 6_371_000;
+  const dL = ((lat2 - lat1) * Math.PI) / 180;
+  const dl = ((lng2 - lng1) * Math.PI) / 180;
+  const a  =
+    Math.sin(dL / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dl / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+const RADAR_RADIUS_M = 5_000;
+
 function HexAvatar({
-  initial, color, size = 52, glow = false, label,
+  initial, color, avatarUrl, size = 52, glow = false, label,
 }: {
-  initial: string; color: string; size?: number; glow?: boolean; label?: string;
+  initial: string; color: string; avatarUrl?: string | null; size?: number; glow?: boolean; label?: string;
 }) {
   const s = size;
   const h = s * 0.866;
@@ -51,16 +64,25 @@ function HexAvatar({
             strokeWidth={glow ? 1.5 : 1}
           />
         </svg>
-        <div
-          className={`absolute inset-0 flex items-center justify-center rounded-sm bg-gradient-to-br ${color} text-white font-bold`}
-          style={{
-            clipPath: `polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)`,
-            fontSize: s * 0.3,
-            boxShadow: glow ? '0 0 12px rgba(245,166,35,0.6)' : undefined,
-          }}
-        >
-          {initial}
-        </div>
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            className="absolute inset-0 w-full h-full object-cover"
+            style={{ clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)' }}
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+          />
+        ) : (
+          <div
+            className={`absolute inset-0 flex items-center justify-center rounded-sm bg-gradient-to-br ${color} text-white font-bold`}
+            style={{
+              clipPath: `polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)`,
+              fontSize: s * 0.3,
+              boxShadow: glow ? '0 0 12px rgba(245,166,35,0.6)' : undefined,
+            }}
+          >
+            {initial}
+          </div>
+        )}
       </div>
       {label && (
         <span className="text-[9px] font-medium text-radar-gold/80 truncate max-w-full px-1 text-center leading-tight">
@@ -77,29 +99,32 @@ const VISIBILITY_OPTIONS: { value: VisibilityMode; label: string; desc: string; 
   { value: 'off',     label: 'APAGADO',  desc: 'Invisible para todos',    color: 'text-slate-400' },
 ];
 
-function buildTravelerIcon(initial: string, isEnigma: boolean) {
+function buildTravelerIcon(initial: string, isEnigma: boolean, avatarUrl?: string | null) {
   const bg = isEnigma ? '#475569' : '#f5a623';
+  const inner = (avatarUrl && !isEnigma)
+    ? `<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'" />`
+    : `<span style="color:white;font-weight:700;font-size:13px;">${isEnigma ? '?' : initial}</span>`;
   const html = `
     <div style="
       width:32px;height:32px;border-radius:50%;
       background:${bg};display:flex;align-items:center;
-      justify-content:center;color:white;font-weight:700;
-      font-size:13px;border:2px solid white;
-      box-shadow:0 2px 8px rgba(0,0,0,0.3);
-    ">${isEnigma ? '?' : initial}</div>`;
+      justify-content:center;overflow:hidden;
+      border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.3);
+    ">${inner}</div>`;
   return L.divIcon({ html, className: '', iconSize: [32, 32], iconAnchor: [16, 16] });
 }
 
-function buildUserIcon(initial: string) {
+function buildUserIcon(initial: string, avatarUrl?: string | null) {
+  const inner = avatarUrl
+    ? `<img src="${avatarUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'" />`
+    : `<span style="color:white;font-weight:800;font-size:16px;">${initial}</span>`;
   const html = `
     <div style="
       width:40px;height:40px;border-radius:50%;
       background:linear-gradient(135deg,#f5a623,#e8850a);
-      display:flex;align-items:center;justify-content:center;
-      color:white;font-weight:800;font-size:16px;
-      border:3px solid white;
-      box-shadow:0 0 16px rgba(245,166,35,0.7);
-    ">${initial}</div>`;
+      display:flex;align-items:center;justify-content:center;overflow:hidden;
+      border:3px solid white;box-shadow:0 0 16px rgba(245,166,35,0.7);
+    ">${inner}</div>`;
   return L.divIcon({ html, className: '', iconSize: [40, 40], iconAnchor: [20, 20] });
 }
 
@@ -120,8 +145,8 @@ const DEFAULT_CENTER: [number, number] = [-33.45, -70.65];
 
 export default function RadarPage() {
   const { theme, hour, setSimHour, simHour } = useTheme();
-  const { profile, setMood, setVisibility } = useProfile();
-  const { user } = useAuth();
+  const { profile, setMood, setVisibility }  = useProfile();
+  const { user, profile: authProfile }       = useAuth();
   const [travelers, setTravelers]         = useState<NearbyTraveler[]>([]);
   const [liveTravelers, setLiveTravelers] = useState<LiveTraveler[]>([]);
   const [editingMood, setEditingMood]     = useState(false);
@@ -134,10 +159,9 @@ export default function RadarPage() {
   const [toast, setToast]                 = useState(false);
   const isNight = theme === 'night';
 
-  // Keep a ref to current values for the interval callbacks
   const userPosRef    = useRef(userPos);
   const visibilityRef = useRef(profile.visibility);
-  useEffect(() => { userPosRef.current    = userPos; },          [userPos]);
+  useEffect(() => { userPosRef.current    = userPos; },            [userPos]);
   useEffect(() => { visibilityRef.current = profile.visibility; }, [profile.visibility]);
 
   useEffect(() => {
@@ -149,8 +173,7 @@ export default function RadarPage() {
   useEffect(() => {
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        const newPos: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        setUserPos(newPos);
+        setUserPos([pos.coords.latitude, pos.coords.longitude]);
         setGpsAccuracy(Math.round(pos.coords.accuracy));
       },
       () => setUserPos(DEFAULT_CENTER),
@@ -167,15 +190,15 @@ export default function RadarPage() {
       .catch(() => {});
   }, [userPos]);
 
-  // Publish own position to Supabase every 30 s (only when public/enigma)
+  // Publish own position every 30 s
   useEffect(() => {
     if (!user) return;
     async function publishPosition() {
       if (visibilityRef.current === 'off') return;
       const [lat, lng] = userPosRef.current;
       await supabase.from('profiles').update({
-        last_lat: lat,
-        last_lng: lng,
+        last_lat:  lat,
+        last_lng:  lng,
         last_seen: new Date().toISOString(),
       }).eq('id', user!.id);
     }
@@ -184,7 +207,7 @@ export default function RadarPage() {
     return () => clearInterval(id);
   }, [user]);
 
-  // Read other users' positions every 30 s
+  // Fetch other users seen within last 5 min, filter to 5 km radius client-side
   useEffect(() => {
     async function fetchLive() {
       const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -193,17 +216,24 @@ export default function RadarPage() {
         .select('id, username, avatar_url, last_lat, last_lng, visibility')
         .neq('id', user?.id ?? '')
         .gte('last_seen', cutoff)
-        .not('last_lat', 'is', null);
+        .not('last_lat', 'is', null)
+        .not('last_lng', 'is', null);
+
       if (data) {
+        const [myLat, myLng] = userPosRef.current;
         setLiveTravelers(
-          data.map((r) => ({
-            id:         r.id,
-            username:   r.username,
-            avatar_url: r.avatar_url,
-            lat:        r.last_lat as number,
-            lng:        r.last_lng as number,
-            visibility: r.visibility ?? 'public',
-          })),
+          data
+            .filter((r) =>
+              haversineM(myLat, myLng, r.last_lat as number, r.last_lng as number) <= RADAR_RADIUS_M,
+            )
+            .map((r) => ({
+              id:         r.id,
+              username:   r.username,
+              avatar_url: r.avatar_url,
+              lat:        r.last_lat as number,
+              lng:        r.last_lng as number,
+              visibility: r.visibility ?? 'public',
+            })),
         );
       }
     }
@@ -212,10 +242,7 @@ export default function RadarPage() {
     return () => clearInterval(id);
   }, [user]);
 
-  function saveMood() {
-    setMood(moodDraft);
-    setEditingMood(false);
-  }
+  function saveMood() { setMood(moodDraft); setEditingMood(false); }
 
   function showVibesToast() {
     setToast(true);
@@ -225,8 +252,12 @@ export default function RadarPage() {
   const visibleTravelers = travelers.filter(
     (t) => profile.visibility !== 'off' && t.visibility !== 'off',
   );
-
   const visibleLive = liveTravelers.filter((t) => t.visibility !== 'off');
+
+  // Avatar for the current user (from Supabase DB)
+  const myAvatarUrl   = authProfile?.avatar_url ?? null;
+  const myInitial     = (authProfile?.username ?? profile.username)[0]?.toUpperCase() ?? 'T';
+  const myDisplayName = authProfile?.username ?? profile.username;
 
   const glassNight = 'bg-[#0a1628]/80 border-amber-500/20 backdrop-blur-md';
   const glassDay   = 'bg-white/85 border-slate-200/80 backdrop-blur-md shadow-sm';
@@ -235,7 +266,7 @@ export default function RadarPage() {
   return (
     <div className="fixed inset-0 w-full h-full overflow-hidden">
 
-      {/* ── FULLSCREEN MAP (base layer) ── */}
+      {/* ── FULLSCREEN MAP ── */}
       <div className="absolute inset-0 z-0">
         <MapContainer
           center={userPos}
@@ -250,22 +281,20 @@ export default function RadarPage() {
           />
           <Circle
             center={userPos}
-            radius={5000}
-            pathOptions={{
-              color: '#7c3aed',
-              fillColor: '#7c3aed',
-              fillOpacity: 0.06,
-              weight: 1.5,
-              dashArray: '6 4',
-            }}
+            radius={RADAR_RADIUS_M}
+            pathOptions={{ color: '#f5a623', fillColor: '#f5a623', fillOpacity: 0.04, weight: 1.5, dashArray: '6 4' }}
           />
-          <Marker position={userPos} icon={buildUserIcon(profile.avatarInitial)}>
+
+          {/* Current user marker */}
+          <Marker position={userPos} icon={buildUserIcon(myInitial, myAvatarUrl)}>
             <Popup>
-              <strong>@{profile.username}</strong>
+              <strong>@{myDisplayName}</strong>
               <br />
-              <span style={{ fontSize: 11, color: '#666' }}>{profile.moodStatus}</span>
+              <span style={{ fontSize: 11, color: '#666' }}>{authProfile?.status_text || profile.moodStatus}</span>
             </Popup>
           </Marker>
+
+          {/* Simulated travelers (connectivity module) */}
           {visibleTravelers.map((t) => {
             const isEnigma = t.visibility === 'enigma';
             const pos = nearbyCoords(userPos[0], userPos[1], t.radarX, t.radarY);
@@ -296,7 +325,7 @@ export default function RadarPage() {
               <Marker
                 key={t.id}
                 position={[t.lat, t.lng]}
-                icon={buildTravelerIcon(initial, isEnigma)}
+                icon={buildTravelerIcon(initial, isEnigma, t.avatar_url)}
               >
                 <Popup>
                   <strong>{isEnigma ? '~enigma' : `@${t.username}`}</strong>
@@ -307,7 +336,7 @@ export default function RadarPage() {
         </MapContainer>
       </div>
 
-      {/* ── TOP HEADER (floating) ── */}
+      {/* ── TOP HEADER ── */}
       <header className="absolute top-0 left-0 right-0 z-20 px-4 pt-12 pb-2 pointer-events-none">
         <div className={`flex items-center justify-between px-4 py-2.5 rounded-2xl border ${glass} pointer-events-auto`}>
           <div className="flex items-center gap-2">
@@ -328,11 +357,7 @@ export default function RadarPage() {
               <span>{visibleTravelers.length + visibleLive.length} cerca</span>
             </div>
             {gpsAccuracy !== null && (
-              <div className={`flex items-center gap-0.5 text-[11px] font-mono font-semibold ${
-                gpsAccuracy <= 100
-                  ? 'text-emerald-400'
-                  : 'text-orange-400'
-              }`}>
+              <div className={`flex items-center gap-0.5 text-[11px] font-mono font-semibold ${gpsAccuracy <= 100 ? 'text-emerald-400' : 'text-orange-400'}`}>
                 <span>🎯</span>
                 <span>{gpsAccuracy}m</span>
               </div>
@@ -350,7 +375,6 @@ export default function RadarPage() {
           </div>
         </div>
 
-        {/* Hour simulator — also floating below header */}
         {showSimBar && (
           <div className={`mt-2 px-4 py-3 rounded-xl border flex items-center gap-3 ${glass} pointer-events-auto`}>
             <span className={`text-xs font-medium ${isNight ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -362,21 +386,24 @@ export default function RadarPage() {
               onChange={(e) => setSimHour(Number(e.target.value))}
               className="flex-1 accent-amber-500 h-1.5"
             />
-            <button
-              onClick={() => setSimHour(null)}
-              className="text-[10px] text-amber-500 hover:text-amber-400 font-medium"
-            >
+            <button onClick={() => setSimHour(null)} className="text-[10px] text-amber-500 hover:text-amber-400 font-medium">
               Real
             </button>
           </div>
         )}
       </header>
 
-      {/* ── MOOD BOX (floating top, below header) ── */}
+      {/* ── MOOD BOX ── */}
       <div className="absolute left-4 right-4 z-20" style={{ top: 110 }}>
         <div className={`flex items-center gap-3 px-4 py-3 rounded-2xl border ${glass}`}>
           <div className="flex-shrink-0">
-            <HexAvatar initial={profile.avatarInitial} color={profile.avatarColor} size={38} glow />
+            <HexAvatar
+              initial={myInitial}
+              color={profile.avatarColor}
+              avatarUrl={myAvatarUrl}
+              size={38}
+              glow
+            />
           </div>
           <div className="flex-1 min-w-0">
             <p className={`text-[9px] font-bold tracking-widest mb-1 ${isNight ? 'text-amber-400/60' : 'text-amber-600/70'}`}>
@@ -395,7 +422,7 @@ export default function RadarPage() {
               />
             ) : (
               <p className={`text-sm font-medium truncate ${isNight ? 'text-white' : 'text-slate-800'}`}>
-                {profile.moodStatus || <span className="opacity-40 italic text-xs">Escribe tu estado...</span>}
+                {authProfile?.status_text || profile.moodStatus || <span className="opacity-40 italic text-xs">Escribe tu estado...</span>}
               </p>
             )}
           </div>
@@ -410,7 +437,7 @@ export default function RadarPage() {
         </div>
       </div>
 
-      {/* ── TRAVELER POPUP (floating, mid-screen) ── */}
+      {/* ── TRAVELER POPUP ── */}
       {selected && (
         <div className="absolute left-4 right-4 z-20" style={{ top: 200 }}>
           <div className={`px-4 py-4 rounded-2xl border animate-slide-up ${glass}`}>
@@ -452,7 +479,7 @@ export default function RadarPage() {
         </div>
       )}
 
-      {/* ── BOTTOM: VISIBILITY + "+" BUTTON (floating) ── */}
+      {/* ── VISIBILITY + "+" BUTTON ── */}
       <div className="absolute bottom-24 left-4 right-4 z-20 flex items-center gap-2">
         <div className={`flex-1 flex items-center rounded-2xl border overflow-hidden ${glass}`}>
           {VISIBILITY_OPTIONS.map(({ value, label, color }) => (
@@ -461,9 +488,7 @@ export default function RadarPage() {
               onClick={() => setVisibility(value)}
               className={`flex-1 py-3 text-[10px] font-bold tracking-widest transition-all duration-200 ${
                 profile.visibility === value
-                  ? isNight
-                    ? 'bg-amber-400/15 text-amber-400'
-                    : 'bg-amber-50 text-amber-700'
+                  ? isNight ? 'bg-amber-400/15 text-amber-400' : 'bg-amber-50 text-amber-700'
                   : `${color} opacity-40 hover:opacity-70`
               }`}
             >
@@ -471,7 +496,6 @@ export default function RadarPage() {
             </button>
           ))}
         </div>
-
         <button
           onClick={showVibesToast}
           className={`flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center border transition-all active:scale-95 ${

@@ -26,6 +26,15 @@ const HISTORY = [
   { id: 3, username: 'luna_t',    avatarColor: 'from-violet-500 to-purple-600', avatarInitial: 'L', route: 'T1 Norte',    date: 'Lun, 18:10' },
 ];
 
+// Adds a cache-busting timestamp to Storage public URLs so browsers always fetch fresh.
+function bustCache(url: string): string {
+  if (!url) return url;
+  // Don't add to data: URIs or DiceBear SVGs
+  if (url.startsWith('data:') || url.includes('dicebear')) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}t=${Date.now()}`;
+}
+
 export default function Perfil() {
   const { theme } = useTheme();
   const { profile, setMood, setTransport } = useProfile();
@@ -36,10 +45,11 @@ export default function Perfil() {
   const [editingMood, setEditingMood] = useState(false);
   const [avatarModal, setAvatarModal] = useState(false);
   const [editModal, setEditModal]     = useState(false);
-  const [avatarUrl, setAvatarUrl]     = useState<string | null>(null);
   const [uploading, setUploading]     = useState(false);
 
-  // Edit modal state
+  // avatarUrl holds the persisted URL from DB (never a local blob/temp URL)
+  const [avatarUrl, setAvatarUrl]     = useState<string | null>(null);
+
   const [editUsername, setEditUsername] = useState('');
   const [editStatus, setEditStatus]     = useState('');
   const [editBio, setEditBio]           = useState('');
@@ -47,13 +57,17 @@ export default function Perfil() {
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Load avatar and profile fields from Supabase on mount / when authProfile changes
+  // Sync avatar URL from DB whenever authProfile changes (covers page load + updates)
   useEffect(() => {
-    if (authProfile?.avatar_url) setAvatarUrl(authProfile.avatar_url);
-    if (authProfile?.username)   setEditUsername(authProfile.username);
-    if (authProfile?.status_text) setEditStatus(authProfile.status_text);
-    if (authProfile?.bio)         setEditBio(authProfile.bio ?? '');
-  }, [authProfile?.avatar_url, authProfile?.username, authProfile?.status_text, authProfile?.bio]);
+    const url = authProfile?.avatar_url ?? null;
+    setAvatarUrl(url ? bustCache(url) : null);
+  }, [authProfile?.avatar_url]);
+
+  useEffect(() => {
+    setEditUsername(authProfile?.username ?? '');
+    setEditStatus(authProfile?.status_text ?? profile.moodStatus);
+    setEditBio(authProfile?.bio ?? '');
+  }, [authProfile?.username, authProfile?.status_text, authProfile?.bio]);
 
   const bg      = isNight ? 'bg-night-base'       : 'bg-day-base';
   const card    = isNight ? 'bg-night-card'       : 'bg-white';
@@ -63,52 +77,53 @@ export default function Perfil() {
   const gold    = isNight ? 'text-radar-gold'     : 'text-amber-600';
   const goldBg  = isNight ? 'bg-radar-gold/10 border-radar-gold/25' : 'bg-amber-50 border-amber-200';
 
-  async function uploadToStorage(file: File): Promise<string | null> {
+  // Upload file to avatars bucket and return the permanent public URL.
+  // Falls back to base64 only if Storage upload fails.
+  async function persistAvatar(file: File): Promise<string | null> {
     if (!user) return null;
-    const ext  = file.name.split('.').pop() ?? 'jpg';
+    const ext  = (file.name.split('.').pop() ?? 'jpg').toLowerCase();
     const path = `${user.id}/avatar.${ext}`;
+
     const { error } = await supabase.storage
       .from('avatars')
-      .upload(path, file, { upsert: true, contentType: file.type });
-    if (error) return null;
-    const { data } = supabase.storage.from('avatars').getPublicUrl(path);
-    return data.publicUrl ?? null;
+      .upload(path, file, { upsert: true, cacheControl: '0', contentType: file.type });
+
+    if (!error) {
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+      return data.publicUrl ?? null;
+    }
+
+    // Storage failed — fall back to base64 if within 1 MB limit
+    if (file.size <= 1_048_576) {
+      return new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target?.result as string);
+        reader.readAsDataURL(file);
+      });
+    }
+    return null;
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
-
-    // Try Storage first; fall back to base64 if it fails or file > 1 MB
-    let url: string | null = null;
-    if (file.size <= 1_048_576) {
-      url = await uploadToStorage(file);
-    }
-
-    if (!url) {
-      // Fallback: base64 (only if <= 1 MB to fit in text column)
-      if (file.size <= 1_048_576) {
-        url = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (ev) => resolve(ev.target?.result as string);
-          reader.readAsDataURL(file);
-        });
-      }
-    }
-
+    const url = await persistAvatar(file);
     if (url) {
-      setAvatarUrl(url);
+      // Save permanent URL to DB first, then update local state from DB via authProfile sync
       await updateProfile?.({ avatar_url: url });
+      setAvatarUrl(bustCache(url));
     }
     setUploading(false);
     setAvatarModal(false);
+    // Reset input so same file can be re-selected later
+    if (fileRef.current) fileRef.current.value = '';
   }
 
   async function selectDicebearAvatar(seed: string) {
     const url = `https://api.dicebear.com/7.x/personas/svg?seed=${seed}`;
-    setAvatarUrl(url);
     await updateProfile?.({ avatar_url: url });
+    setAvatarUrl(url);
     setAvatarModal(false);
   }
 
@@ -133,6 +148,7 @@ export default function Perfil() {
   }
 
   const displayUsername = authProfile?.username ?? 'tú';
+  const displayInitial  = displayUsername[0]?.toUpperCase() ?? profile.avatarInitial;
 
   return (
     <div className={`min-h-screen ${bg} transition-colors duration-700 pb-32`}>
@@ -150,15 +166,18 @@ export default function Perfil() {
       <div className="px-5 -mt-10 flex items-end justify-between mb-5">
         <button onClick={() => setAvatarModal(true)} className="relative" disabled={uploading}>
           {avatarUrl ? (
-            avatarUrl.startsWith('data:') ? (
-              <img src={avatarUrl} className="w-[72px] h-[72px] rounded-2xl object-cover" style={{ boxShadow: '0 0 20px rgba(245,166,35,0.35)' }} />
-            ) : (
-              <img src={avatarUrl} className="w-[72px] h-[72px] rounded-2xl bg-[#0d1c3f] p-1 object-cover" style={{ boxShadow: '0 0 20px rgba(245,166,35,0.35)' }} />
-            )
+            <img
+              src={avatarUrl}
+              className="w-[72px] h-[72px] rounded-2xl object-cover"
+              style={{ boxShadow: '0 0 20px rgba(245,166,35,0.35)' }}
+              onError={() => setAvatarUrl(null)}
+            />
           ) : (
-            <div className={`w-[72px] h-[72px] rounded-2xl bg-gradient-to-br ${profile.avatarColor} flex items-center justify-center text-white font-bold text-2xl`}
-              style={{ boxShadow: '0 0 20px rgba(245,166,35,0.35)' }}>
-              {displayUsername[0]?.toUpperCase() ?? profile.avatarInitial}
+            <div
+              className={`w-[72px] h-[72px] rounded-2xl bg-gradient-to-br ${profile.avatarColor} flex items-center justify-center text-white font-bold text-2xl`}
+              style={{ boxShadow: '0 0 20px rgba(245,166,35,0.35)' }}
+            >
+              {displayInitial}
             </div>
           )}
           <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center">
@@ -169,10 +188,7 @@ export default function Perfil() {
             )}
           </div>
         </button>
-        <button
-          onClick={openEditModal}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${goldBg} ${gold}`}
-        >
+        <button onClick={openEditModal} className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${goldBg} ${gold}`}>
           Editar
         </button>
       </div>
@@ -281,14 +297,12 @@ export default function Perfil() {
               <h3 className="text-white font-bold text-base">Cambiar foto de perfil</h3>
               <button onClick={() => setAvatarModal(false)}><X size={18} className="text-slate-400" /></button>
             </div>
-
             <button onClick={() => fileRef.current?.click()}
               className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-[#1a2d55] mb-4 text-left">
               <Camera size={18} className="text-amber-400" />
               <span className="text-white text-sm">📷 Subir desde galería</span>
             </button>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
-
             <p className="text-slate-400 text-xs mb-3 font-semibold tracking-wider">FEMENINOS</p>
             <div className="grid grid-cols-5 gap-2 mb-4">
               {FEMALE_AVATARS.map((seed) => (
@@ -319,7 +333,6 @@ export default function Perfil() {
               <h3 className={`font-bold text-base ${textPri}`}>Editar perfil</h3>
               <button onClick={() => setEditModal(false)}><X size={18} className={textSec} /></button>
             </div>
-
             <div className="space-y-4">
               <div>
                 <label className={`text-xs font-semibold tracking-wider ${textSec}`}>USERNAME</label>
@@ -334,7 +347,6 @@ export default function Perfil() {
                   />
                 </div>
               </div>
-
               <div>
                 <label className={`text-xs font-semibold tracking-wider ${textSec}`}>ESTADO DE ÁNIMO</label>
                 <input
@@ -347,7 +359,6 @@ export default function Perfil() {
                   placeholder="¿Cómo te sientes hoy?"
                 />
               </div>
-
               <div>
                 <label className={`text-xs font-semibold tracking-wider ${textSec}`}>BIO</label>
                 <textarea
@@ -362,7 +373,6 @@ export default function Perfil() {
                 />
               </div>
             </div>
-
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setEditModal(false)}
