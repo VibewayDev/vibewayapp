@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './lib/timeTheme';
 import { ProfileProvider } from './lib/profileContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { GpsProvider } from './contexts/GpsContext';
 import Layout from './components/Layout';
 import Welcome from './pages/Welcome';
 import RadarPage from './pages/Radar';
@@ -36,13 +37,23 @@ function AppRoutes() {
   );
 }
 
+function AppWithGps() {
+  const { session } = useAuth();
+  if (!session) return <AppRoutes />;
+  return (
+    <GpsProvider>
+      <AppRoutes />
+    </GpsProvider>
+  );
+}
+
 export default function App() {
   return (
     <ThemeProvider>
       <ProfileProvider>
         <AuthProvider>
           <BrowserRouter>
-            <AppRoutes />
+            <AppWithGps />
           </BrowserRouter>
         </AuthProvider>
       </ProfileProvider>
