@@ -8,6 +8,7 @@ import { connectivity, type NearbyTraveler } from '../lib/connectivity';
 import { useTheme } from '../lib/timeTheme';
 import { useProfile } from '../lib/profileContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useGps } from '../contexts/GpsContext';
 import { supabase } from '../lib/supabase';
 import type { VisibilityMode } from '../lib/connectivity';
 
@@ -146,25 +147,21 @@ export default function RadarPage() {
   const { theme, hour, setSimHour, simHour } = useTheme();
   const { profile, setMood, setVisibility }  = useProfile();
   const { user, profile: authProfile }       = useAuth();
+  const { userPos, gpsAccuracy }             = useGps();
   const [travelers, setTravelers]         = useState<NearbyTraveler[]>([]);
   const [liveTravelers, setLiveTravelers] = useState<LiveTraveler[]>([]);
   const [editingMood, setEditingMood]     = useState(false);
   const [moodDraft, setMoodDraft]         = useState(profile.moodStatus);
   const [selected, setSelected]           = useState<NearbyTraveler | null>(null);
   const [showSimBar, setShowSimBar]       = useState(false);
-  const [userPos, setUserPos]             = useState<[number, number]>(DEFAULT_CENTER);
-  const [gpsAccuracy, setGpsAccuracy]     = useState<number | null>(null);
   const [temperature, setTemperature]     = useState<number | null>(null);
   const [toast, setToast]                 = useState(false);
-  const [gpsReady, setGpsReady]           = useState(false);
   const isNight = theme === 'night';
 
   const userPosRef    = useRef(userPos);
   const visibilityRef = useRef(profile.visibility);
-  const gpsReadyRef   = useRef(false);
   useEffect(() => { userPosRef.current    = userPos; },            [userPos]);
   useEffect(() => { visibilityRef.current = profile.visibility; }, [profile.visibility]);
-  useEffect(() => { gpsReadyRef.current   = gpsReady; },           [gpsReady]);
 
   // Connectivity module (simulated travelers)
   useEffect(() => {
@@ -173,30 +170,8 @@ export default function RadarPage() {
     return () => { unsub(); connectivity.stop(); };
   }, []);
 
-  // GPS watchPosition — publica posición en Supabase en cada actualización
-  useEffect(() => {
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const newPos: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        setUserPos(newPos);
-        setGpsAccuracy(Math.round(pos.coords.accuracy));
-        setGpsReady(true);
-        gpsReadyRef.current = true;
-        if (user?.id && visibilityRef.current !== 'off') {
-          supabase.from('profiles').update({
-            last_lat:  pos.coords.latitude,
-            last_lng:  pos.coords.longitude,
-            last_seen: new Date().toISOString(),
-          }).eq('id', user.id).then(({ error }) => {
-            if (error) console.error('[Radar] GPS publish error:', error.message);
-          });
-        }
-      },
-      () => setUserPos(DEFAULT_CENTER),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
-    );
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [user]);
+  // GPS y publicación de posición manejados por GpsContext (App.tsx)
+  // El Radar solo lee userPos y gpsAccuracy desde useGps()
 
   // Temperatura desde Open-Meteo
   useEffect(() => {
@@ -206,24 +181,6 @@ export default function RadarPage() {
       .then((d) => setTemperature(Math.round(d.current_weather?.temperature ?? 0)))
       .catch(() => {});
   }, [userPos]);
-
-  // Publicar posición cada 30s (respaldo del watchPosition)
-  useEffect(() => {
-    if (!user?.id) return;
-    async function publishPosition() {
-      if (visibilityRef.current === 'off') return;
-      if (!gpsReadyRef.current) return; // No publicar hasta tener GPS real
-      const [lat, lng] = userPosRef.current;
-      await supabase.from('profiles').update({
-        last_lat:  lat,
-        last_lng:  lng,
-        last_seen: new Date().toISOString(),
-      }).eq('id', user!.id);
-    }
-    publishPosition();
-    const id = setInterval(publishPosition, 30_000);
-    return () => clearInterval(id);
-  }, [user]);
 
   // Carga inicial de viajeros reales
   useEffect(() => {
