@@ -66,14 +66,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const userId = signInData.user?.id ?? data.user?.id;
     if (userId) {
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: userId,
-        username,
-        transport_mode: 'bus',
-        status_text: 'En camino',
-        visibility: 'public',
-      });
-      if (profileError) return { error: `[profile] ${profileError.message} (code: ${profileError.code})` };
+      const { error: profileError } = await supabase.from('profiles').upsert(
+        { id: userId, username, transport_mode: 'bus', status_text: 'En camino', visibility: 'public' },
+        { onConflict: 'id', ignoreDuplicates: true },
+      );
+      // 23505 = unique_violation: trigger already created the row, not a real error
+      if (profileError && profileError.code !== '23505') {
+        return { error: `[profile] ${profileError.message} (code: ${profileError.code})` };
+      }
     }
 
     return { error: null };

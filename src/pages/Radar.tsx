@@ -173,14 +173,26 @@ export default function RadarPage() {
   useEffect(() => {
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
-        setUserPos([pos.coords.latitude, pos.coords.longitude]);
+        const newPos: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+        setUserPos(newPos);
         setGpsAccuracy(Math.round(pos.coords.accuracy));
+
+        // Publish position immediately on every GPS update (not only in the interval)
+        if (user?.id && visibilityRef.current !== 'off') {
+          supabase.from('profiles').update({
+            last_lat:  pos.coords.latitude,
+            last_lng:  pos.coords.longitude,
+            last_seen: new Date().toISOString(),
+          }).eq('id', user.id).then(({ error }) => {
+            if (error) console.error('[Radar] GPS publish error:', error.message);
+          });
+        }
       },
       () => setUserPos(DEFAULT_CENTER),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
     );
     return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     const [lat, lon] = userPos;
@@ -190,34 +202,44 @@ export default function RadarPage() {
       .catch(() => {});
   }, [userPos]);
 
-  // Publish own position every 30 s
+  // Publish own position every 30 s via interval (belt-and-suspenders with the GPS watcher)
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
     async function publishPosition() {
       if (visibilityRef.current === 'off') return;
       const [lat, lng] = userPosRef.current;
-      await supabase.from('profiles').update({
+      const { error } = await supabase.from('profiles').update({
         last_lat:  lat,
         last_lng:  lng,
         last_seen: new Date().toISOString(),
       }).eq('id', user!.id);
+      if (error) console.error('[Radar] interval publish error:', error.message);
     }
     publishPosition();
     const id = setInterval(publishPosition, 30_000);
     return () => clearInterval(id);
   }, [user]);
 
-  // Fetch other users seen within last 5 min, filter to 5 km radius client-side
+  // Fetch other users seen within last 30 min, filter to 5 km radius client-side
   useEffect(() => {
     async function fetchLive() {
-      const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      const { data } = await supabase
+      // Don't query until we have a real user session
+      if (!user?.id) return;
+
+      const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
         .from('profiles')
         .select('id, username, avatar_url, last_lat, last_lng, visibility')
-        .neq('id', user?.id ?? '')
+        .neq('id', user.id)
         .gte('last_seen', cutoff)
         .not('last_lat', 'is', null)
-        .not('last_lng', 'is', null);
+        .not('last_lng', 'is', null)
+        .neq('visibility', 'off');
+
+      if (error) {
+        console.error('[Radar] fetchLive error:', error.message);
+        return;
+      }
 
       if (data) {
         const [myLat, myLng] = userPosRef.current;
