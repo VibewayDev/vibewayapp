@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Pencil, Check, MapPin, Shield, Clock, ChevronRight, LogOut, Camera, X } from 'lucide-react';
+import { Pencil, Check, MapPin, Shield, Clock, ChevronRight, LogOut, Camera, X, Image as ImageIcon, Plus, Trash2 } from 'lucide-react';
 import { useTheme } from '../lib/timeTheme';
 import { useProfile } from '../lib/profileContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -26,10 +26,14 @@ const HISTORY = [
   { id: 3, username: 'luna_t',    avatarColor: 'from-violet-500 to-purple-600', avatarInitial: 'L', route: 'T1 Norte',    date: 'Lun, 18:10' },
 ];
 
-// Adds a cache-busting timestamp to Storage public URLs so browsers always fetch fresh.
+interface GaleriaImagen {
+  id: string;
+  url: string;
+  created_at: string;
+}
+
 function bustCache(url: string): string {
   if (!url) return url;
-  // Don't add to data: URIs or DiceBear SVGs
   if (url.startsWith('data:') || url.includes('dicebear')) return url;
   const sep = url.includes('?') ? '&' : '?';
   return `${url}${sep}t=${Date.now()}`;
@@ -46,9 +50,10 @@ export default function Perfil() {
   const [avatarModal, setAvatarModal] = useState(false);
   const [editModal, setEditModal]     = useState(false);
   const [uploading, setUploading]     = useState(false);
+  const [uploadingGallery, setUploadingGallery] = useState(false);
 
-  // avatarUrl holds the persisted URL from DB (never a local blob/temp URL)
   const [avatarUrl, setAvatarUrl]     = useState<string | null>(null);
+  const [galeria, setGaleria]         = useState<GaleriaImagen[]>([]);
 
   const [editUsername, setEditUsername] = useState('');
   const [editStatus, setEditStatus]     = useState('');
@@ -56,12 +61,31 @@ export default function Perfil() {
   const [saving, setSaving]             = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
+  const galleryFileRef = useRef<HTMLInputElement>(null);
 
-  // Sync avatar URL from DB whenever authProfile changes (covers page load + updates)
+  // Sync avatar URL
   useEffect(() => {
     const url = authProfile?.avatar_url ?? null;
     setAvatarUrl(url ? bustCache(url) : null);
   }, [authProfile?.avatar_url]);
+
+  // Cargar imágenes de la galería del usuario desde la tabla 'imagenes'
+  const cargarGaleria = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('imagenes')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setGaleria(data);
+    }
+  };
+
+  useEffect(() => {
+    cargarGaleria();
+  }, [user]);
 
   useEffect(() => {
     setEditUsername(authProfile?.username ?? '');
@@ -77,8 +101,7 @@ export default function Perfil() {
   const gold    = isNight ? 'text-radar-gold'     : 'text-amber-600';
   const goldBg  = isNight ? 'bg-radar-gold/10 border-radar-gold/25' : 'bg-amber-50 border-amber-200';
 
-  // Upload file to avatars bucket and return the permanent public URL.
-  // Falls back to base64 only if Storage upload fails.
+  // CONTROL DEL AVATAR (Bucket: 'avatars')
   async function persistAvatar(file: File): Promise<string | null> {
     if (!user) return null;
     const ext  = (file.name.split('.').pop() ?? 'jpg').toLowerCase();
@@ -93,7 +116,6 @@ export default function Perfil() {
       return data.publicUrl ?? null;
     }
 
-    // Storage failed — fall back to base64 if within 1 MB limit
     if (file.size <= 1_048_576) {
       return new Promise<string>((resolve) => {
         const reader = new FileReader();
@@ -110,14 +132,65 @@ export default function Perfil() {
     setUploading(true);
     const url = await persistAvatar(file);
     if (url) {
-      // Save permanent URL to DB first, then update local state from DB via authProfile sync
       await updateProfile?.({ avatar_url: url });
       setAvatarUrl(bustCache(url));
     }
     setUploading(false);
     setAvatarModal(false);
-    // Reset input so same file can be re-selected later
     if (fileRef.current) fileRef.current.value = '';
+  }
+
+  // CONTROL DE LA GALERÍA (Bucket: 'images' -> Tabla: 'imagenes')
+  async function handleGalleryUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setUploadingGallery(true);
+    const ext = (file.name.split('.').pop() ?? 'jpg').toLowerCase();
+    // Generar un nombre único por marca de tiempo para evitar sobreescribir la galería anterior
+    const path = `${user.id}/${Date.now()}.${ext}`;
+
+    // Subir archivo al bucket 'images' (el de la galería)
+    const { error: uploadError } = await supabase.storage
+      .from('images')
+      .upload(path, file, { cacheControl: '3600', contentType: file.type });
+
+    if (!uploadError) {
+      const { data } = supabase.storage.from('images').getPublicUrl(path);
+      const publicUrl = data.publicUrl;
+
+      // Guardar el registro en la tabla de base de datos 'imagenes'
+      const { error: dbError } = await supabase
+        .from('imagenes')
+        .insert([{ user_id: user.id, url: publicUrl }]);
+
+      if (!dbError) {
+        cargarGaleria(); // Refrescar fotos en pantalla
+      } else {
+        console.error("Error guardando en la DB:", dbError.message);
+      }
+    } else {
+      console.error("Error subiendo al Storage:", uploadError.message);
+    }
+
+    setUploadingGallery(false);
+    if (galleryFileRef.current) galleryFileRef.current.value = '';
+  }
+
+  async function deleteGalleryImage(id: string, url: string) {
+    try {
+      // Extraer el path relativo del bucket a partir de la URL pública
+      const urlParts = url.split('/storage/v1/object/public/images/');
+      if (urlParts.length === 2) {
+        const storagePath = urlParts[1];
+        await supabase.storage.from('images').remove([storagePath]);
+      }
+      
+      await supabase.from('imagenes').delete().eq('id', id);
+      cargarGaleria();
+    } catch (err) {
+      console.error("Error eliminando imagen:", err);
+    }
   }
 
   async function selectDicebearAvatar(seed: string) {
@@ -223,6 +296,49 @@ export default function Perfil() {
             <span className={`text-[10px] mt-0.5 ${textSec}`}>{label}</span>
           </div>
         ))}
+      </div>
+
+      {/* COMPONENTE NUEVO: GALERÍA DE IMÁGENES */}
+      <div className="px-5 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <p className={`text-xs font-bold tracking-widest ${textSec}`}>GALERÍA DE FOTOS</p>
+          <button 
+            onClick={() => galleryFileRef.current?.click()}
+            disabled={uploadingGallery}
+            className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1.5 rounded-lg border ${goldBg} ${gold} transition-all`}
+          >
+            {uploadingGallery ? (
+              <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <>
+                <Plus size={12} />
+                <span>Añadir</span>
+              </>
+            )}
+          </button>
+          <input ref={galleryFileRef} type="file" accept="image/*" className="hidden" onChange={handleGalleryUpload} />
+        </div>
+
+        {galeria.length === 0 ? (
+          <div className={`rounded-2xl border border-dashed ${border} ${card} py-8 px-4 flex flex-col items-center justify-center text-center`}>
+            <ImageIcon size={24} className={`${textSec} opacity-40 mb-2`} />
+            <p className={`text-xs ${textSec}`}>Tu galería está vacía. Añade tus mejores momentos en ruta.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {galeria.map((img) => (
+              <div key={img.id} className="relative aspect-square rounded-xl overflow-hidden group border bg-black/5" style={{ borderColor: isNight ? '#1a2d55' : '#e8edf9' }}>
+                <img src={img.url} className="w-full h-full object-cover" />
+                <button 
+                  onClick={() => deleteGalleryImage(img.id, img.url)}
+                  className="absolute top-1 right-1 p-1 rounded-lg bg-black/60 text-red-400 opacity-80 hover:opacity-100 transition-all"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Transport mode */}
